@@ -1,0 +1,58 @@
+# ── Python ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── 가상환경 ─────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── 환경 변수 ─────────────────────────────────────────
+.env
+.env.local
+
+# ── Stage 1 파이프라인 생성물 (재생성 가능) ───────────
+stage1/outputs/data/*.csv
+stage1/outputs/models/*.pkl
+stage1/outputs/figures/*.png
+stage1/outputs/metrics/*.csv
+!stage1/outputs/**/.gitkeep
+
+# ── Stage 2 파이프라인 생성물 ─────────────────────────
+stage2/outputs/data/*.csv
+stage2/outputs/models/*.pkl
+stage2/outputs/figures/*.png
+stage2/outputs/metrics/*.csv
+!stage2/outputs/**/.gitkeep
+
+# ── Jupyter ──────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── macOS ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ──────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Claude Code ──────────────────────────────────────
+.claude/
+
+# ── 추가 보강 (요청) ─────────────────────────────────
+*.pkl
+*.csv
+*.pyc
+*.log
+stage1/outputs/
+stage2/outputs/
+# .gitkeep은 폴더 구조 유지를 위해 추적 유지
+!stage1/outputs/**/.gitkeep
+!stage2/outputs/**/.gitkeep
