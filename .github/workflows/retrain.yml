@@ -1,0 +1,115 @@
+name: 분기별 자동 재학습
+
+# ───────────────────────────────────────────────────────────────
+# 목적: SK하이닉스 실적 발표(1·4·7·10월 넷째 주 목요일) 다음 날(금요일)에
+#       Stage1·2 파이프라인을 재학습하고 산출물을 S3에 올린 뒤 Railway 재배포.
+#
+# cron 한계 노트:
+#   표준 cron에는 "n번째 요일" 문법이 없고, GitHub(Vixie cron)은
+#   day-of-month와 day-of-week를 동시에 지정하면 OR로 평가한다.
+#   → "매월 22~28일"로 범위를 잡으면 4번째 금요일이 반드시 이 안에 들어오므로,
+#     그 범위에서 cron을 돌리고 gate 잡에서 "금요일인지"만 KST 기준으로 확인한다.
+# ───────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # 0:00 UTC == 09:00 KST. 1/4/7/10월, 매월 22~28일 매일 발화 → gate에서 금요일만 통과.
+    - cron: "0 0 22-28 1,4,7,10 *"
+  workflow_dispatch:        # 수동 트리거(테스트용)
+
+jobs:
+  # ── gate: 실제 실행 여부 판정 (스케줄은 KST 금요일에만, 수동은 항상) ──
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        name: 실행 여부 판정 (넷째 주 금요일 / 수동)
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "수동 트리거 — 실행합니다."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DOW=$(TZ=Asia/Seoul date +%u)              # 1=월 ... 5=금 ... 7=일
+          NOW=$(TZ=Asia/Seoul date '+%Y-%m-%d (%a) %H:%M %Z')
+          echo "KST 현재: $NOW  (DOW=$DOW)"
+          if [ "$DOW" = "5" ]; then
+            echo "넷째 주 금요일 — 실행합니다."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "금요일이 아니므로 스킵합니다."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── retrain: 재학습 → S3 업로드 → Railway 재배포 ──
+  retrain:
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180          # 두 파이프라인(Optuna+expanding window) 여유 시간
+
+    # 4. 환경변수 주입 (GitHub Secrets)
+    env:
+      FRED_API_KEY:          ${{ secrets.FRED_API_KEY }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_BUCKET_NAME:        ${{ secrets.S3_BUCKET_NAME }}
+      RAILWAY_TOKEN:         ${{ secrets.RAILWAY_TOKEN }}
+
+    steps:
+      # 1. 레포 체크아웃
+      - name: 레포 체크아웃
+        uses: actions/checkout@v4
+
+      # 2. Python 3.11 설치
+      - name: Python 3.11 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: stage1/requirements.txt
+
+      # (Railway CLI용) Node.js 설치
+      - name: Node.js 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 3. 패키지 설치 (stage1/requirements.txt = 공통 의존성)
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r stage1/requirements.txt
+
+      # 5. Stage 1 파이프라인
+      - name: Stage 1 재학습
+        run: python stage1/pipeline.py
+
+      # 6. Stage 2 파이프라인 (Stage 1 산출물 필요)
+      - name: Stage 2 재학습
+        run: python stage2/pipeline.py
+
+      # 7. 산출물 S3 업로드
+      - name: S3 업로드
+        run: python upload_to_s3.py
+
+      # 8. Railway 컨테이너 재배포 (서비스: kubig-e2e-hynix)
+      - name: Railway 재배포
+        run: |
+          npm install -g @railway/cli
+          railway redeploy --service kubig-e2e-hynix --yes
+
+      # 완료 결과 로그 (성공/실패 무관하게 항상 출력)
+      - name: 결과 출력
+        if: always()
+        run: |
+          echo "──────────────────────────────────────────────"
+          echo " 재학습 워크플로우 결과: ${{ job.status }}"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo " ✅ 재학습 → S3 업로드 → Railway 재배포 성공"
+          else
+            echo " ❌ 파이프라인 실패 — 로그에서 실패 단계를 확인하세요."
+          fi
+          echo "──────────────────────────────────────────────"
