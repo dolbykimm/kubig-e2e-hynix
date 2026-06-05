@@ -299,7 +299,7 @@ def render_confusion(df: pd.DataFrame):
         index=["실제 상승", "실제 하락"],
         columns=["예측 상승", "예측 하락"],
     )
-    st.dataframe(cm.style.background_gradient(cmap="Blues"), use_container_width=True)
+    st.dataframe(cm.style.background_gradient(cmap="Blues"), width='stretch')
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -330,7 +330,7 @@ def view_stage1():
     st.line_chart(df, height=380)
 
     with st.expander("Hold-out 예측 상세 데이터"):
-        st.dataframe(df.style.format("{:.2f}"), use_container_width=True)
+        st.dataframe(df.style.format("{:.2f}"), width='stretch')
 
 
 def view_stage2():
@@ -363,7 +363,7 @@ def view_stage2():
         render_confusion(df)
 
     with st.expander("Hold-out 예측 상세 데이터"):
-        st.dataframe(df.style.format("{:.2f}"), use_container_width=True)
+        st.dataframe(df.style.format("{:.2f}"), width='stretch')
 
 
 def view_e2e():
@@ -403,7 +403,7 @@ def view_e2e():
             st.line_chart(s1pred[[BRIDGE_COL]].dropna(), height=300)
         else:
             st.warning(f"`{BRIDGE_COL}` 컬럼을 찾을 수 없습니다.")
-            st.dataframe(s1pred.head(), use_container_width=True)
+            st.dataframe(s1pred.head(), width='stretch')
     except Exception as e:
         st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
         s1pred = None
@@ -450,7 +450,7 @@ def view_e2e():
             })
         except Exception as e:
             rows.append({"단계": cfg["name"], "방향정확도(전체)": f"오류: {e}"})
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
 
 # ──────────────────────────────────────────────────────────────────
