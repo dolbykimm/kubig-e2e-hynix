@@ -310,20 +310,6 @@ def get_market_momentum() -> dict:
     return result
 
 
-def get_trends_latest(s2feat: pd.DataFrame):
-    """
-    stage2_features.csv에서 Google Trends 류 컬럼의 최신값을 찾는다.
-    (현 데이터셋엔 Trends 피처가 없을 수 있으므로 없으면 (None, None) 반환)
-    """
-    cands = [c for c in s2feat.columns
-             if "trend" in c.lower() or c.lower() in ("gt", "google_trends", "gtrend")]
-    if not cands:
-        return None, None
-    col = cands[0]
-    series = s2feat[col].dropna()
-    return col, (float(series.iloc[-1]) if len(series) else None)
-
-
 # ──────────────────────────────────────────────────────────────────
 # 4. 공통 UI 헬퍼
 # ──────────────────────────────────────────────────────────────────
@@ -526,21 +512,13 @@ def _flow_arrow():
 
 
 def render_market_signals():
-    """E2E ④: 현재 시장 신호 요약 카드 (Google Trends / KOSPI / SOX / 종합)."""
+    """E2E ④: 현재 시장 신호 요약 카드 (KOSPI / SOX 모멘텀 + 종합 신호)."""
     st.subheader("④ 현재 시장 신호 요약")
-    st.caption("실시간 시장 모멘텀과 데이터셋 최신값으로 구성한 현재 종합 신호")
+    st.caption("실시간 시장 모멘텀과 모델 최신 예측으로 구성한 현재 종합 신호")
 
     mom = get_market_momentum()
     kospi_mom = mom.get("KOSPI")
     sox_mom   = mom.get("SOX")
-
-    # Google Trends: 데이터셋에서 탐색 (없으면 N/A)
-    trends_col, trends_val = None, None
-    try:
-        s2feat = load_csv(STAGE2["features_path"])
-        trends_col, trends_val = get_trends_latest(s2feat)
-    except Exception:
-        pass
 
     # 모델의 현재 방향 신호 (Stage 2 최신 예측)
     model_up = None
@@ -556,21 +534,15 @@ def render_market_signals():
     def _mom_str(v):
         return "N/A" if v is None else f"{v:+.1f}%"
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        if trends_val is not None:
-            st.metric("🔎 Google Trends (최신)", f"{trends_val:.1f}", help=f"컬럼: {trends_col}")
-        else:
-            st.metric("🔎 Google Trends (최신)", "N/A")
-            st.caption("데이터셋에 Trends 피처 없음")
-    with c2:
         st.metric("🇰🇷 KOSPI 모멘텀 (3M)", _mom_str(kospi_mom),
                   delta=None if kospi_mom is None else f"{kospi_mom:+.1f}%")
-    with c3:
+    with c2:
         st.metric("💽 SOX 모멘텀 (3M)", _mom_str(sox_mom),
                   delta=None if sox_mom is None else f"{sox_mom:+.1f}%")
 
-    # ── 종합 신호: 가용 신호의 방향을 집계 ──
+    # ── 종합 신호: 가용 신호의 방향을 다수결 집계 ──
     votes = []
     if kospi_mom is not None:
         votes.append(kospi_mom > 0)
@@ -579,7 +551,7 @@ def render_market_signals():
     if model_up is not None:
         votes.append(model_up)
 
-    with c4:
+    with c3:
         if not votes:
             st.metric("🧭 종합 신호", "N/A")
         else:
