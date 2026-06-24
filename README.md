@@ -22,14 +22,50 @@
 
 ### Stage 2 — SK하이닉스 6개월 주가 수익률 예측 (분기)
 
-| 지표 | 값 |
-|------|----|
-| CV RMSE (5-fold) | **16.77** |
-| CV DirAcc | **70.0%** (Bull 66.7% / Bear 71.7%) |
-| CV AsymLoss | **17.48** |
-| CV IC (Spearman) | 0.12 |
-| Hold-out DirAcc (최근 12분기) | 58.3% |
-| 최종 선택 피처 수 | 25개 |
+평가 환경: Tune 86분기 / Hold-out 20분기 (2021-01-28 ~ 2025-10-23)
+
+| 지표 | 베이스라인 | 최종 모델 (Dynamic Weight) |
+|------|-----------|--------------------------|
+| CV RMSE (5-fold) | 20.882% | **18.974%** |
+| CV DirAcc | 80.0% (Bull 85.0% / Bear 50.0%) | **90.0%** (Bull 88.3% / Bear 100.0%) |
+| CV AsymLoss | 21.099 | **19.320** |
+| CV IC (Spearman) | +0.440 | **+0.600** |
+| Hold-out RMSE | 68.946% | **62.389%** |
+| Hold-out DirAcc (최근 20분기) | 55.0% (Bull 66.7% / Bear 37.5%) | **60.0%** (Bull 91.7% / Bear 12.5%) |
+| Hold-out IC | -0.218 | **+0.033** |
+| 최적 recency_scale | — | 0.4087 |
+| 최종 선택 피처 수 | 25개 | 25개 |
+
+> ⚠️ **Hold-out Bear DirAcc**: Dynamic Weight은 CV에서 Bear DirAcc를 50.0% → 100.0%로 개선했으나,
+> Hold-out에서는 37.5% → 12.5%로 악화됨. recency 가중치가 "최근 Bull 우세 패턴"을 강화하는 특성에서 비롯된 트레이드오프라고 판단.
+
+> **AsymLoss**: Bear 국면(수익률 ≤ 0) 오예측에 ×3.0 페널티를 부여한 커스텀 손실함수.
+
+---
+
+## 평가 설계 원칙 (Stage 2)
+
+### 왜 RMSE가 아닌 DirAcc를 최적화 기준으로 삼았는가
+
+SK하이닉스 6개월 수익률은 분기에 따라 -150% ~ +180%에 달하는 극단적인 변동폭을 보인다.
+Hold-out 구간 타겟의 표준편차 자체가 약 60%p를 넘는 상황에서, RMSE를 직접 최소화하는 접근은 구조적으로 한계가 있다고 판단했다.
+특히 2025년의 AI 반도체 수요 급증으로 인한 +150%대 수익률은 어떤 과거 패턴으로도 정량 예측이 불가능한 외생적 충격이다.
+
+실질적인 투자 의사결정 관점에서도 "정확히 몇 % 오르는가"보다 **"오를 것인가 내릴 것인가"**가 우선적인 정보이다. 
+따라서 본 프로젝트는 DirAcc를 핵심 성능 지표로, 방향 오예측에 대한 비대칭 페널티(Asymmetric Loss)를 학습 목적함수로 채택했다. 
+특히 하락(Bear) 오예측에 가장 큰 페널티(×3.0)를 부여했는데, 
+이는 "상승을 놓치는 기회비용"보다 "하락을 못 보고 매수해 발생하는 원금 손실"이 더 치명적이기 때문이다.
+
+### 왜 Hold-out 구간을 20분기로 설정했는가
+
+| TEST_EVAL_SIZE | 기간 | Bull | Bear | 비고 |
+|---|---|---|---|---|
+| 12분기 | 2023-01 ~ 2025-10 | 11 | 1 | Bear 표본 1개 → 평가 지표가 0%/100%로만 산출, 통계적으로 무의미 |
+| **20분기** | **2021-01 ~ 2025-10** | **12** | **8** | **Bull:Bear ≈ 60:40, 가장 균형적** ✅ |
+| 24분기 | 2020-01 ~ 2025-10 | 15 | 9 | 학습 데이터 추가 축소, COVID 구간 포함 |
+
+12분기 설정에서는 Bear 표본이 단 1개뿐이라, Bear DirAcc가 0% 또는 100%만 나온다는 한계가 있다. 
+따라서 Bull/Bear 분기의 비율이 가장 균형적이면서 학습 데이터(86분기)를 충분히 확보할 수 있는 **20분기**를 최종 평가 기준으로 채택했다.
 
 ---
 
@@ -38,6 +74,7 @@
 ```
 conference/
 ├── wsts_historical.xlsx        WSTS 원본 데이터
+├── requirements.txt            패키지 버전 고정 (xgboost==3.2.0 등)
 │
 ├── stage1/                     Stage 1 — 반도체 업황 YoY% 예측
 │   ├── config.py               공통 경로·상수·하이퍼파라미터
@@ -61,7 +98,7 @@ conference/
     ├── s2_data.py              Step 2: A~E 피처 수집 (yfinance · FRED · WSTS)
     ├── s3_stage1_feat.py       Step 3: Stage 1 Expanding Window Pseudo 예측
     ├── s4_features.py          Step 4: 피처 엔지니어링 + 피처 선택
-    ├── s5_tune.py              Step 5: XGBoost Optuna 튜닝
+    ├── s5_tune.py              Step 5: XGBoost Optuna 튜닝 (USE_DYNAMIC_WEIGHTS 플래그)
     ├── s6_evaluate.py          Step 6: 최종 평가 + 시각화
     └── outputs/                실행 후 자동 생성
         ├── data/               CSV 데이터 파일
@@ -85,7 +122,7 @@ python --version  # 3.9+
 ### 2. 패키지 설치
 
 ```bash
-pip install -r stage1/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 3. FRED API 키 설정
@@ -233,11 +270,27 @@ TARGET_Asia_Pacific_YoY_T6 = Asia Pacific 매출 YoY% (보조 타겟)
 - `v2_pred_ww_yoy` 파생 피처: 예측 vs 현재 WSTS YoY% 괴리, Bull/Bear 신호
 - **3단계 피처 선택**: NaN 비율 필터 → VIF 다중공선성 제거(임계 10) → XGBoost importance 상위 60% → RFE 최종 **25개**
 
-#### Step 5 — XGBoost Optuna 튜닝 (`s5_tune.py`)
+#### Step 5 — XGBoost Optuna 튜닝 + Dynamic Sample Weight (`s5_tune.py`)
 
 - **Phase A**: RMSE 최소화 → `skh_xgb_tuned.pkl`
 - **Phase B**: AsymLoss (Bear 오예측 ×3.0 페널티) 최소화 → `skh_xgb_final.pkl`
 - CV 구조: TimeSeriesSplit 5-fold (test_size=4분기, min_train=20분기)
+
+> **Dynamic Sample Weight** — 베이스라인 대비 최종 모델의 핵심 개선
+>
+> 베이스라인은 Bear 여부에 따른 고정 가중치만 사용한다(`Bull=1.0 / Bear=2.0`). 최종 모델은 여기에 시간 가중치(Recency Weight)를 결합해, 최근 분기일수록 더 높은 가중치로 학습하도록 설계했다. 
+> Hold-out 구간(2021~2025)이 AI 반도체 수요 급증으로 학습 구간 전체의 패턴과 분포가 달라지는 것(distribution shift)에 대응하기 위함이다.
+>
+> ```python
+> def dynamic_weights(y, recency_scale):
+>     recency_w = np.exp(np.linspace(0, recency_scale, len(y)))
+>     recency_w = recency_w / recency_w.mean()          # 평균 1.0 정규화
+>     bear_w    = np.where(y > 0, 1.0, BEAR_SAMPLE_W)  # 기존 Bear 가중치
+>     return recency_w * bear_w
+> ```
+>
+> `recency_scale`은 Optuna로 XGBoost 하이퍼파라미터와 함께 공동 탐색한다 (탐색 범위: 0.0~0.5, 최적값: 0.4087). `exp(0.4087) ≈ 1.50`으로, 가장 오래된 샘플 대비 최근 샘플의 가중치가 약 1.5배 상향된다. 
+> `USE_DYNAMIC_WEIGHTS` 플래그(`True`/`False`)로 베이스라인과 최종 모델을 전환할 수 있다.
 
 #### Step 6 — 최종 평가 + 시각화 (`s6_evaluate.py`)
 
@@ -275,7 +328,7 @@ TARGET_Asia_Pacific_YoY_T6 = Asia Pacific 매출 YoY% (보조 타겟)
 |------|--------|------|
 | `START_YEAR` | `2000` | 데이터 수집 시작 연도 |
 | `END_YEAR` | `2026` | 데이터 수집 종료 연도 |
-| `TEST_EVAL_SIZE` | `12` | Hold-out 분기 수 (3년) |
+| `TEST_EVAL_SIZE` | `20` | Hold-out 분기 수 (5년, Bull/Bear 균형 기준) |
 | `N_SPLITS` | `5` | TimeSeriesSplit fold 수 |
 | `TEST_SIZE` | `4` | fold당 test 분기 수 |
 | `N_TRIALS` | `50` | Optuna trial 수 |
@@ -324,7 +377,7 @@ stage2/outputs/
 │
 ├── models/
 │   ├── skh_xgb_tuned.pkl           Step 5 RMSE 최적 파라미터
-│   └── skh_xgb_final.pkl           Step 5 AsymLoss 최적화 최종 모델 ★
+│   └── skh_xgb_final.pkl           Step 5 AsymLoss + Dynamic Weight 최종 모델 ★
 │
 ├── metrics/
 │   └── final_cv_metrics.csv        fold별 RMSE / DirAcc / AsymLoss / IC

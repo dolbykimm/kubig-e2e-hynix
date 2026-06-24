@@ -33,7 +33,7 @@ END_YEAR   = 2026
 PRIMARY_TARGET = "TARGET_SKH_6M_RET"
 
 # CV 설정 (분기 단위)
-TEST_EVAL_SIZE = 12   # hold-out 분기 수 (3년)
+TEST_EVAL_SIZE = 20   # hold-out 분기 수 (5년)
 N_SPLITS       = 5
 TEST_SIZE      = 4    # fold당 test 분기
 MIN_TRAIN      = 20   # fold 최소 train 분기

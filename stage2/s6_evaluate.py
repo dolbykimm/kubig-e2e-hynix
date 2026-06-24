@@ -77,11 +77,25 @@ def load_data():
     return X.iloc[:split], y.iloc[:split], X.iloc[split:], y.iloc[split:]
 
 
+def dynamic_weights(y, recency_scale: float = 0.0) -> np.ndarray:
+    """Recency weight(최근 시점일수록 지수적으로 증가) x 기존 bear weight."""
+    y_arr = np.asarray(y)
+    n = len(y_arr)
+    recency_w = np.exp(np.linspace(0, recency_scale, n))
+    recency_w = recency_w / recency_w.mean()
+    bear_w = np.where(y_arr > 0, 1.0, BEAR_SAMPLE_W)
+    return recency_w * bear_w
+
+
 def load_model():
     with open(FINAL_PKL, "rb") as f:
         data = pickle.load(f)
-    print(f"  최종 모델 로드: 피처 {len(data['feature_names'])}개")
-    return data["model"], data["feature_names"], data.get("best_params", {})
+    use_dw    = bool(data.get("use_dynamic_weights", False))
+    rec_scale = float(data.get("recency_scale", 0.0))
+    print(f"  최종 모델 로드: 피처 {len(data['feature_names'])}개  "
+          f"dynamic_weights={use_dw}  recency_scale={rec_scale:.4f}")
+    return (data["model"], data["feature_names"],
+            data.get("best_params", {}), use_dw, rec_scale)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -125,14 +139,19 @@ def avg_metrics(fold_results: list) -> dict:
 # CV / Hold-out 평가
 # ──────────────────────────────────────────────────────────────
 
-def run_cv(model, X_tune: pd.DataFrame, y_tune: pd.Series) -> list:
+def run_cv(model, X_tune: pd.DataFrame, y_tune: pd.Series,
+           use_dynamic_weights: bool = False,
+           recency_scale: float = 0.0) -> list:
     params = model.get_params()
     tscv   = TimeSeriesSplit(n_splits=N_SPLITS, test_size=TEST_SIZE)
     results = []
     for fold_i, (tr, te) in enumerate(tscv.split(X_tune), 1):
         if len(tr) < MIN_TRAIN:
             continue
-        w_tr = np.where(y_tune.iloc[tr].values > 0, 1.0, BEAR_SAMPLE_W)
+        if use_dynamic_weights:
+            w_tr = dynamic_weights(y_tune.iloc[tr], recency_scale)
+        else:
+            w_tr = np.where(y_tune.iloc[tr].values > 0, 1.0, BEAR_SAMPLE_W)
         m = xgb.XGBRegressor(**params)
         m.fit(X_tune.iloc[tr], y_tune.iloc[tr], sample_weight=w_tr)
         preds  = m.predict(X_tune.iloc[te])
@@ -148,9 +167,14 @@ def run_cv(model, X_tune: pd.DataFrame, y_tune: pd.Series) -> list:
 
 
 def run_holdout(model, X_tune: pd.DataFrame, y_tune: pd.Series,
-                X_ho: pd.DataFrame, y_ho: pd.Series):
+                X_ho: pd.DataFrame, y_ho: pd.Series,
+                use_dynamic_weights: bool = False,
+                recency_scale: float = 0.0):
     params = model.get_params()
-    w_tune = np.where(y_tune.values > 0, 1.0, BEAR_SAMPLE_W)
+    if use_dynamic_weights:
+        w_tune = dynamic_weights(y_tune, recency_scale)
+    else:
+        w_tune = np.where(y_tune.values > 0, 1.0, BEAR_SAMPLE_W)
     m = xgb.XGBRegressor(**params)
     m.fit(X_tune, y_tune, sample_weight=w_tune)
     preds   = m.predict(X_ho)
@@ -216,9 +240,14 @@ def save_csv(fold_results: list, cv_avg: dict, holdout: dict):
 # Figure 1: 예측 vs 실제 수익률 타임라인
 # ──────────────────────────────────────────────────────────────
 
-def fig1_timeline(model, X_tune, y_tune, X_ho, y_ho, holdout_preds):
+def fig1_timeline(model, X_tune, y_tune, X_ho, y_ho, holdout_preds,
+                  use_dynamic_weights: bool = False,
+                  recency_scale: float = 0.0):
     params = model.get_params()
-    w_tune = np.where(y_tune.values > 0, 1.0, BEAR_SAMPLE_W)
+    if use_dynamic_weights:
+        w_tune = dynamic_weights(y_tune, recency_scale)
+    else:
+        w_tune = np.where(y_tune.values > 0, 1.0, BEAR_SAMPLE_W)
     m = xgb.XGBRegressor(**params)
     m.fit(X_tune, y_tune, sample_weight=w_tune)
     tune_preds = m.predict(X_tune)
@@ -328,15 +357,20 @@ def fig2_cv_metrics(cv_avg: dict, holdout: dict):
 # Figure 3: Bull/Bear 방향성 분석
 # ──────────────────────────────────────────────────────────────
 
-def fig3_direction(model, X_tune, y_tune, X_ho, y_ho, holdout_preds):
+def fig3_direction(model, X_tune, y_tune, X_ho, y_ho, holdout_preds,
+                   use_dynamic_weights: bool = False,
+                   recency_scale: float = 0.0):
     params  = model.get_params()
     tscv    = TimeSeriesSplit(n_splits=N_SPLITS, test_size=TEST_SIZE)
     cv_bull, cv_bear = [], []
     for tr, te in tscv.split(X_tune):
         if len(tr) < MIN_TRAIN: continue
+        if use_dynamic_weights:
+            w_tr = dynamic_weights(y_tune.iloc[tr], recency_scale)
+        else:
+            w_tr = np.where(y_tune.iloc[tr].values > 0, 1.0, BEAR_SAMPLE_W)
         m = xgb.XGBRegressor(**params)
-        m.fit(X_tune.iloc[tr], y_tune.iloc[tr],
-              sample_weight=np.where(y_tune.iloc[tr].values > 0, 1.0, BEAR_SAMPLE_W))
+        m.fit(X_tune.iloc[tr], y_tune.iloc[tr], sample_weight=w_tr)
         p  = m.predict(X_tune.iloc[te])
         yt = y_tune.iloc[te].values
         c  = (yt > 0) == (p > 0)
@@ -460,14 +494,17 @@ def main():
           f"({X_ho.index[0].date()} ~ {X_ho.index[-1].date()})")
 
     print("\n[2] 최종 모델 로드")
-    model, features, _ = load_model()
+    model, features, _, use_dw, rec_scale = load_model()
 
     print("\n[3] TimeSeriesSplit CV 평가 (5-fold)")
-    fold_results = run_cv(model, X_tune, y_tune)
+    fold_results = run_cv(model, X_tune, y_tune,
+                          use_dynamic_weights=use_dw, recency_scale=rec_scale)
     cv_avg       = avg_metrics(fold_results)
 
     print("\n[4] Hold-out 평가")
-    holdout, ho_preds, trained_model = run_holdout(model, X_tune, y_tune, X_ho, y_ho)
+    holdout, ho_preds, trained_model = run_holdout(
+        model, X_tune, y_tune, X_ho, y_ho,
+        use_dynamic_weights=use_dw, recency_scale=rec_scale)
 
     print("\n[5] 결과 요약")
     print()
@@ -475,9 +512,11 @@ def main():
 
     print("\n[6] 파일 저장")
     save_csv(fold_results, cv_avg, holdout)
-    fig1_timeline(model, X_tune, y_tune, X_ho, y_ho, ho_preds)
+    fig1_timeline(model, X_tune, y_tune, X_ho, y_ho, ho_preds,
+                  use_dynamic_weights=use_dw, recency_scale=rec_scale)
     fig2_cv_metrics(cv_avg, holdout)
-    fig3_direction(model, X_tune, y_tune, X_ho, y_ho, ho_preds)
+    fig3_direction(model, X_tune, y_tune, X_ho, y_ho, ho_preds,
+                   use_dynamic_weights=use_dw, recency_scale=rec_scale)
     fig4_simulation(y_ho, ho_preds)
 
     def _fmt(v, pct=False):
