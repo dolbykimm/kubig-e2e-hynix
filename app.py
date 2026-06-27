@@ -1082,7 +1082,7 @@ def main():
 
     view = st.sidebar.radio(
         "메뉴",
-        ["홈  한눈에 보기", "A.  SK하이닉스 전망", "B.  반도체 경기", "C.  작동 원리"],
+        ["🏠 한눈에 보기", "A.  SK하이닉스 전망", "B.  반도체 경기", "작동 원리"],
         index=0,
     )
 
@@ -1124,7 +1124,7 @@ def main():
 
     st.title("반도체 사이클 기반 SK하이닉스 수익률 예측")
 
-    if view.startswith("홈"):
+    if view.startswith("🏠"):
         view_home(expert_mode)
     elif view.startswith("A."):
         view_stage2(expert_mode)
