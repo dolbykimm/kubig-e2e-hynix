@@ -17,8 +17,8 @@ WORKDIR /app
 
 # ── 레이어 캐싱 최적화 ──
 # 의존성 목록만 먼저 복사·설치 → 소스만 바뀌면 pip 설치 캐시 재사용
-# stage1/requirements.txt를 stage1·stage2 공통 의존성으로 사용
-COPY stage1/requirements.txt ./requirements.txt
+# 루트 requirements.txt에 streamlit·plotly·boto3 등 대시보드 의존성 포함
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── 소스 복사 ──
