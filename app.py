@@ -3,18 +3,6 @@ app.py — E2E 반도체 사이클 → SK하이닉스 수익률 예측 대시보
 ================================================================================
 Stage 1 (반도체 출하량 YoY 예측) → Stage 2 (SK하이닉스 6개월 수익률 방향 예측)
 2단계 파이프라인의 학습 결과를 발표용으로 시각화한다.
-
-[화면 설계]
-  - 메인: 방향 예측(📈 상승 / 📉 하락)을 크고 명확하게
-  - 부가: 예측 수익률 수치는 작은 caption으로
-  - 알파: SHAP 피처 중요도(상위 10) + 과거 분기별 적중 히스토리(✅/❌)
-  - E2E: 시각적 흐름 다이어그램 + 현재 시장 신호 요약 카드
-
-[기술 노트]
-  - 모델 로딩은 st.cache_resource, 데이터/연산 결과는 st.cache_data로 캐싱
-  - 성능 지표(metrics)는 hold-out 평가를 재현해 런타임 계산
-  - SHAP: shap.TreeExplainer로 XGBoost 설명 → st.bar_chart (matplotlib 미사용)
-  - 한글 폰트가 없는 Linux 컨테이너 대비, 모든 시각화는 Streamlit 네이티브 차트 사용
 """
 
 import os
@@ -22,6 +10,7 @@ import pickle
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 # ── 페이지 설정 (반드시 첫 Streamlit 호출) ──────────────────────────
@@ -35,10 +24,8 @@ st.set_page_config(
 # 상수 정의
 # ──────────────────────────────────────────────────────────────────
 
-# 컨테이너 작업 경로(/app). 로컬 실행 시에는 app.py가 위치한 폴더로 폴백.
 APP_ROOT = os.getenv("APP_ROOT", os.path.dirname(os.path.abspath(__file__)))
 
-# S3에서 받아와야 하는 산출물 (S3 key == 로컬 상대경로)
 ARTIFACTS = [
     "stage1/outputs/models/best_xgboost_final.pkl",
     "stage1/outputs/data/features_dataset.csv",
@@ -47,19 +34,30 @@ ARTIFACTS = [
     "stage2/outputs/data/stage1_predictions.csv",
 ]
 
-# Asymmetric Loss 가중치 (stage1/2 config.py와 동일) — Bear 오예측 페널티 강화
 W_BULL_CORRECT, W_BULL_WRONG = 1.0, 2.0
 W_BEAR_CORRECT, W_BEAR_WRONG = 1.5, 3.0
 BEAR_SAMPLE_W = 2.0
 
-# Stage별 메타데이터
+# ── 컬러 팔레트 ───────────────────────────────────────────────────
+CLR_BLUE  = "#2a78d6"
+CLR_TEAL  = "#1D9E75"
+CLR_RED   = "#E24B4A"
+CLR_AMBER = "#EF9F27"
+CLR_GRAY  = "#888780"
+
+BG_BLUE  = "#e6f1fb"
+BG_GREEN = "#eaf3de"
+BG_TEAL  = "#e1f5ee"
+BG_RED   = "#fcebeb"
+BG_AMBER = "#faeeda"
+
 STAGE1 = {
     "name": "Stage 1",
     "title": "반도체 출하량 YoY 예측",
     "features_path": os.path.join(APP_ROOT, "stage1/outputs/data/features_dataset.csv"),
     "model_path":    os.path.join(APP_ROOT, "stage1/outputs/models/best_xgboost_final.pkl"),
     "target":        "TARGET_Worldwide_YoY_T6",
-    "test_eval":     24,        # hold-out 개월 수
+    "test_eval":     24,
     "value_label":   "예측 YoY",
     "freq_label":    "개월",
 }
@@ -69,13 +67,12 @@ STAGE2 = {
     "features_path": os.path.join(APP_ROOT, "stage2/outputs/data/stage2_features.csv"),
     "model_path":    os.path.join(APP_ROOT, "stage2/outputs/models/skh_xgb_final.pkl"),
     "target":        "TARGET_SKH_6M_RET",
-    "test_eval":     12,        # hold-out 분기 수
+    "test_eval":     12,
     "value_label":   "예측 수익률",
     "freq_label":    "분기",
 }
 
 STAGE1_PRED_PATH = os.path.join(APP_ROOT, "stage2/outputs/data/stage1_predictions.csv")
-# Stage 1 → Stage 2로 전달되는 핵심 피처(예측값) 컬럼명
 BRIDGE_COL = "v2_pred_ww_yoy"
 
 
@@ -88,12 +85,6 @@ def download_artifacts():
     """
     S3에서 ARTIFACTS를 APP_ROOT 하위로 다운로드한다.
     세션당 1회만 실행되도록 cache_resource로 캐싱.
-
-    반환: dict(status, missing, error)
-      - status == "ok"          : 전부 성공
-      - status == "missing"     : 일부 파일이 버킷에 없음 → 학습 필요
-      - status == "no_bucket"   : S3_BUCKET_NAME 미설정
-      - status == "s3_error"    : 자격증명/네트워크 등 S3 접근 실패
     """
     bucket = os.getenv("S3_BUCKET_NAME")
     if not bucket:
@@ -101,7 +92,7 @@ def download_artifacts():
 
     try:
         import boto3
-        from botocore.exceptions import ClientError, BotoCoreError, NoCredentialsError
+        from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
     except ImportError as e:
         return {"status": "s3_error", "missing": [], "error": f"boto3 미설치: {e}"}
 
@@ -122,7 +113,6 @@ def download_artifacts():
             s3.download_file(bucket, key, local_path)
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
-            # 객체가 없으면(404/NoSuchKey) "학습 필요" 신호로 수집
             if code in ("404", "NoSuchKey", "NoSuchBucket"):
                 missing.append(key)
             else:
@@ -170,14 +160,12 @@ def guard_artifacts():
 
 @st.cache_resource(show_spinner=False)
 def load_model(path: str):
-    """pkl 번들 로드: {'model', 'feature_names', 'best_params'}."""
     with open(path, "rb") as f:
         return pickle.load(f)
 
 
 @st.cache_data(show_spinner=False)
 def load_csv(path: str) -> pd.DataFrame:
-    """index_col=0(날짜) 기준 CSV 로드."""
     return pd.read_csv(path, index_col=0, parse_dates=True)
 
 
@@ -193,7 +181,6 @@ def _safe_rmse(y_true, y_pred, mask):
 
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, with_ic: bool = False) -> dict:
-    """7~8개 표준 지표 계산 (evaluate 스크립트와 동일 정의)."""
     bull    = y_true > 0
     bear    = ~bull
     correct = (y_true > 0) == (y_pred > 0)
@@ -211,7 +198,6 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, with_ic: bool = Fals
         "asym_loss": float(np.sqrt((w * (y_true - y_pred) ** 2).sum() / w.sum())),
     }
     if with_ic:
-        # Spearman 순위상관(IC). scipy는 scikit-learn 의존성으로 항상 설치됨.
         ic = pd.Series(y_true).corr(pd.Series(y_pred), method="spearman")
         metrics["ic"] = float(ic) if pd.notna(ic) else None
     return metrics
@@ -220,10 +206,6 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, with_ic: bool = Fals
 @st.cache_data(show_spinner="모델 성능을 평가하는 중...")
 def evaluate_stage(features_path: str, model_path: str, target: str,
                    test_eval: int, with_ic: bool = False):
-    """
-    저장된 최종 모델의 하이퍼파라미터로 tune 구간 재학습 → hold-out 예측.
-    반환: (metrics dict, 예측/실제 정렬 DataFrame)
-    """
     import xgboost as xgb
 
     bundle  = load_model(model_path)
@@ -232,7 +214,6 @@ def evaluate_stage(features_path: str, model_path: str, target: str,
     params  = model.get_params()
 
     df = load_csv(features_path)
-    # 모델이 학습한 피처만 사용 (없는 컬럼은 제외)
     use_feats = [f for f in feats if f in df.columns]
     df_clean  = df.dropna(subset=[target])
     X = df_clean[use_feats].ffill().fillna(0)
@@ -242,7 +223,6 @@ def evaluate_stage(features_path: str, model_path: str, target: str,
     X_tune, y_tune = X.iloc[:split], y.iloc[:split]
     X_ho,   y_ho   = X.iloc[split:], y.iloc[split:]
 
-    # Bear(하락) 구간 sample_weight 강화 후 재학습
     w_tune = np.where(y_tune.values > 0, 1.0, BEAR_SAMPLE_W)
     m = xgb.XGBRegressor(**params)
     m.fit(X_tune, y_tune, sample_weight=w_tune)
@@ -260,11 +240,6 @@ def evaluate_stage(features_path: str, model_path: str, target: str,
 @st.cache_data(show_spinner="SHAP 피처 중요도 계산 중...")
 def compute_shap_importance(model_path: str, features_path: str, target: str,
                             top_n: int = 10) -> pd.DataFrame:
-    """
-    저장된 XGBoost 모델을 shap.TreeExplainer로 설명해
-    평균 |SHAP| 기준 상위 top_n 피처 중요도를 반환한다.
-    반환: index=피처명, 컬럼='평균 |SHAP|' 인 DataFrame.
-    """
     import shap
 
     bundle = load_model(model_path)
@@ -288,10 +263,6 @@ def compute_shap_importance(model_path: str, features_path: str, target: str,
 
 @st.cache_data(ttl=3600, show_spinner="시장 신호(yfinance) 수집 중...")
 def get_market_momentum() -> dict:
-    """
-    KOSPI(^KS11) / SOX(^SOX) 최근 3개월 모멘텀(현재가/3개월전가 - 1, %)을 계산.
-    네트워크 실패 시 None.
-    """
     import yfinance as yf
 
     result = {}
@@ -311,7 +282,7 @@ def get_market_momentum() -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────
-# 4. 공통 UI 헬퍼
+# 4. UI 헬퍼
 # ──────────────────────────────────────────────────────────────────
 
 def _fmt(v, pct=False):
@@ -320,48 +291,366 @@ def _fmt(v, pct=False):
     return f"{v:.1f}%" if pct else f"{v:.3f}"
 
 
+def _pill(text: str, bg: str, fg: str) -> str:
+    return (
+        f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:500;"
+        f"padding:3px 10px;border-radius:20px;white-space:nowrap'>{text}</span>"
+    )
+
+
+def _chart_legend(*items) -> str:
+    badges = " ".join(_pill(label, bg, fg) for label, bg, fg in items)
+    return f"<div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'>{badges}</div>"
+
+
+def _inject_styles():
+    st.markdown("""
+<style>
+.signal-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-bottom: 0.5px solid rgba(136,135,128,0.25);
+}
+.signal-row:last-child { border-bottom: none; }
+.signal-label { font-size: 13px; color: var(--text-secondary, #555); }
+.signal-val   { font-size: 13px; font-weight: 500; }
+.signal-val.up  { color: #1D9E75; }
+.signal-val.dn  { color: #E24B4A; }
+.signal-val.neu { color: #EF9F27; }
+
+.cb-label { display:flex; justify-content:space-between; font-size:12px;
+            color:#888; margin-bottom:5px; }
+.cb-track { height:8px; border-radius:4px; background:rgba(136,135,128,0.2); overflow:hidden; }
+.cb-fill  { height:100%; border-radius:4px; }
+
+.caution-box { background:#faeeda; border-radius:10px; padding:14px; margin-top:12px; }
+.caution-box .c-title { font-size:12px; font-weight:500; color:#854F0B; margin-bottom:6px; }
+.caution-box .c-body  { font-size:12px; color:#633806; line-height:1.7; }
+
+.expert-banner { background:#e6f1fb; border-radius:10px; padding:12px 16px;
+                 margin-bottom:16px; border-left:3px solid #2a78d6; }
+.eb-title { font-size:13px; font-weight:500; color:#0C447C; margin-bottom:2px; }
+.eb-body  { font-size:12px; color:#185FA5; line-height:1.6; }
+
+.kpi-card { background:var(--secondary-background-color,#f8f9fa);
+            border-radius:10px; border:0.5px solid rgba(136,135,128,0.25);
+            padding:14px 16px; }
+.kpi-label { font-size:12px; color:#888; margin-bottom:4px; }
+.kpi-value { font-size:22px; font-weight:500; color:var(--text-color,#111);
+             margin-bottom:6px; }
+</style>
+""", unsafe_allow_html=True)
+
+
+def _expert_banner():
+    st.markdown("""
+<div class="expert-banner">
+  <div class="eb-title">🔬 전문가 모드 켜짐</div>
+  <div class="eb-body">판단 근거, 모델 수치, 주의사항을 상세하게 보여줘요.</div>
+</div>
+""", unsafe_allow_html=True)
+
+
+def _confidence_bar(pct: float, label: str, color: str = CLR_BLUE):
+    st.markdown(f"""
+<div class="cb-label">
+  <span>{label}</span>
+  <span style="color:{color};font-weight:500">{pct:.0f}%</span>
+</div>
+<div class="cb-track">
+  <div class="cb-fill" style="width:{pct:.0f}%;background:{color}"></div>
+</div>
+""", unsafe_allow_html=True)
+
+
+def _signal_rows(rows: list):
+    html = ""
+    for label, val, direction in rows:
+        cls = {"up": "up", "dn": "dn", "neu": "neu"}.get(direction, "")
+        html += (
+            f"<div class='signal-row'>"
+            f"<span class='signal-label'>{label}</span>"
+            f"<span class='signal-val {cls}'>{val}</span>"
+            f"</div>"
+        )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _caution_box(text: str):
+    st.markdown(f"""
+<div class="caution-box">
+  <div class="c-title">⚠️ 주의사항</div>
+  <div class="c-body">{text}</div>
+</div>
+""", unsafe_allow_html=True)
+
+
+def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
+    """Plotly 리본 차트: 80%/95% 신뢰구간 밴드 + 예측 파선 + 실제값 실선."""
+    dates   = out_df.index.tolist()
+    actual  = out_df["실제값"].tolist()
+    pred    = out_df["예측값"].tolist()
+    sigma   = rmse
+
+    upper95 = [p + 1.96 * sigma for p in pred]
+    lower95 = [p - 1.96 * sigma for p in pred]
+    upper80 = [p + 1.28 * sigma for p in pred]
+    lower80 = [p - 1.28 * sigma for p in pred]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=dates + dates[::-1],
+        y=upper95 + lower95[::-1],
+        fill="toself", fillcolor="rgba(29,158,117,0.10)",
+        line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="95% CI",
+    ))
+    fig.add_trace(go.Scatter(
+        x=dates + dates[::-1],
+        y=upper80 + lower80[::-1],
+        fill="toself", fillcolor="rgba(29,158,117,0.22)",
+        line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="80% CI",
+    ))
+    fig.add_trace(go.Scatter(
+        x=dates, y=pred,
+        line=dict(color=CLR_BLUE, width=2, dash="dash"),
+        showlegend=False, name="예측 중앙값",
+    ))
+    fig.add_trace(go.Scatter(
+        x=dates, y=actual,
+        line=dict(color=CLR_TEAL, width=2),
+        mode="lines+markers", marker=dict(size=5, color=CLR_TEAL),
+        showlegend=False, name="실제값",
+    ))
+
+    fig.update_layout(
+        height=height,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        margin=dict(l=0, r=0, t=8, b=0),
+        yaxis=dict(gridcolor="rgba(136,135,128,0.15)", zeroline=False),
+        xaxis=dict(showgrid=False),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(_chart_legend(
+        ("예측 중앙값", BG_BLUE, "#185FA5"),
+        ("80% 신뢰구간", BG_GREEN, "#3B6D11"),
+        ("95% 신뢰구간", BG_TEAL, "#085041"),
+    ), unsafe_allow_html=True)
+
+
+# ──────────────────────────────────────────────────────────────────
+# 5. 공통 섹션 렌더러
+# ──────────────────────────────────────────────────────────────────
+
 def render_direction_headline(out_df: pd.DataFrame, value_label: str):
-    """메인: 최신 예측의 방향(📈/📉)을 크게, 수익률 수치는 작은 caption으로."""
     pred = float(out_df["예측값"].iloc[-1])
     date = out_df.index[-1]
     up   = pred > 0
 
-    emoji = "📈" if up else "📉"
-    label = "상승" if up else "하락"
-    color = "#16a34a" if up else "#dc2626"
-    bg    = "#dcfce7" if up else "#fee2e2"
+    emoji  = "📈" if up else "📉"
+    label  = "상승" if up else "하락"
+    color  = CLR_TEAL if up else CLR_RED
+    bg     = BG_TEAL  if up else BG_RED
+
+    direction_pill = _pill("▲ 상승 전망" if up else "▼ 하락 전망", bg, color)
+    ai_pill        = _pill("AI 예측", BG_BLUE, "#185FA5")
 
     st.markdown(
         f"<div style='text-align:center;padding:1.5rem;border-radius:16px;"
         f"background:{bg};margin:0.2rem 0 0.4rem 0;'>"
-        f"<div style='font-size:3.4rem;font-weight:800;color:{color};line-height:1.15'>"
-        f"{emoji} {label} 전망</div></div>",
+        f"<div style='font-size:3.4rem;font-weight:500;color:{color};line-height:1.15'>"
+        f"{emoji} {label} 전망</div>"
+        f"<div style='margin-top:10px;display:flex;gap:8px;justify-content:center'>"
+        f"{ai_pill} {direction_pill}</div>"
+        f"</div>",
         unsafe_allow_html=True,
     )
-    # 부가: 예측 수익률 수치는 작은 글씨
-    st.caption(f"📅 기준 시점 **{date.date()}** · {value_label} **{pred:+.2f}%** (부가 수치)")
+    st.caption(f"📅 기준 시점 **{date.date()}** · {value_label} **{pred:+.2f}%**")
+
+
+def _kpi(label: str, value: str, pill_text: str = None,
+         pill_bg: str = BG_BLUE, pill_fg: str = "#185FA5"):
+    pill_html = _pill(pill_text, pill_bg, pill_fg) if pill_text else ""
+    st.markdown(
+        f"<div class='kpi-card'>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"{pill_html}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _pill_grade(v):
+    """정확도 수치 → (pill_text, bg, fg) 튜플."""
+    if v is None:
+        return None
+    if v >= 80:
+        return f"{v:.0f}%", BG_GREEN, "#3B6D11"
+    if v >= 60:
+        return f"{v:.0f}%", BG_AMBER, "#854F0B"
+    return f"{v:.0f}%", BG_RED, "#A32D2D"
 
 
 def render_metric_cards(metrics: dict, with_ic: bool = False):
-    """성능 지표를 KPI 카드 형태로 표시."""
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("방향 정확도 (전체)", _fmt(metrics["dir_acc"], pct=True))
-    c2.metric("방향 정확도 (Bull/상승)", _fmt(metrics["dir_bull"], pct=True))
-    c3.metric("방향 정확도 (Bear/하락)", _fmt(metrics["dir_bear"], pct=True))
-    c4.metric("RMSE (전체)", _fmt(metrics["rmse"]))
+    with c1:
+        p = _pill_grade(metrics["dir_acc"])
+        _kpi("방향 정확도 (전체)", _fmt(metrics["dir_acc"], pct=True),
+             p[0] if p else None, p[1] if p else BG_BLUE, p[2] if p else "#185FA5")
+    with c2:
+        p = _pill_grade(metrics.get("dir_bull"))
+        _kpi("방향 정확도 (Bull)", _fmt(metrics.get("dir_bull"), pct=True),
+             p[0] if p else None, p[1] if p else BG_BLUE, p[2] if p else "#185FA5")
+    with c3:
+        p = _pill_grade(metrics.get("dir_bear"))
+        _kpi("방향 정확도 (Bear)", _fmt(metrics.get("dir_bear"), pct=True),
+             p[0] if p else None, p[1] if p else BG_BLUE, p[2] if p else "#185FA5")
+    with c4:
+        _kpi("RMSE (전체)", _fmt(metrics["rmse"]), "오차 지표", BG_BLUE, "#185FA5")
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("RMSE (Bull)", _fmt(metrics["rmse_bull"]))
-    c6.metric("RMSE (Bear)", _fmt(metrics["rmse_bear"]))
-    c7.metric("Asymmetric Loss", _fmt(metrics["asym_loss"]))
-    if with_ic:
-        c8.metric("IC (Spearman)", _fmt(metrics.get("ic")))
+    with c5:
+        _kpi("RMSE (Bull)", _fmt(metrics.get("rmse_bull")))
+    with c6:
+        _kpi("RMSE (Bear)", _fmt(metrics.get("rmse_bear")))
+    with c7:
+        _kpi("Asymmetric Loss", _fmt(metrics.get("asym_loss")))
+    with c8:
+        if with_ic:
+            _kpi("IC (Spearman)", _fmt(metrics.get("ic")))
+        else:
+            _kpi("Hold-out 구간", f"{metrics['n_holdout']}개")
+
+
+def render_shap_section(cfg: dict):
+    st.markdown("#### 🔬 SHAP 피처 중요도 (상위 10)")
+    st.caption("평균 |SHAP| 값이 클수록 예측에 더 많이 기여한 피처")
+    try:
+        shap_df = compute_shap_importance(cfg["model_path"], cfg["features_path"], cfg["target"])
+        fig = go.Figure(go.Bar(
+            x=shap_df["평균 |SHAP|"].values,
+            y=shap_df.index.tolist(),
+            orientation="h",
+            marker_color=CLR_BLUE,
+        ))
+        fig.update_layout(
+            height=360,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=8, b=0),
+            yaxis=dict(autorange="reversed", gridcolor="rgba(0,0,0,0)"),
+            xaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"SHAP 계산을 수행하지 못했습니다: {e}")
+
+
+def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
+                           stage: str, expert_mode: bool):
+    """📊 한 줄 요약 + 🔍 세부 분석 아코디언 + 🎯 신뢰도 바."""
+    dir_acc  = metrics.get("dir_acc", 0)
+    dir_bear = metrics.get("dir_bear")
+    rmse     = metrics.get("rmse", 0)
+    asym     = metrics.get("asym_loss", 0)
+    n_ho     = metrics.get("n_holdout", 0)
+    pred_last = float(out_df["예측값"].iloc[-1])
+    is_up     = pred_last > 0
+
+    # ── 📊 한 줄 요약 ──
+    st.markdown("#### 📊 한 줄 요약")
+    if expert_mode:
+        st.markdown(
+            f"방향 정확도 **{_fmt(dir_acc, pct=True)}** (Bear {_fmt(dir_bear, pct=True)}) · "
+            f"RMSE **{rmse:.2f}** · AsymLoss **{asym:.2f}** · Hold-out {n_ho}개 기준."
+        )
     else:
-        c8.metric("Hold-out 구간", f"{metrics['n_holdout']}개")
+        if is_up:
+            st.markdown(
+                "반도체 사이클 지표가 상승 구간을 가리키고 있어요 📈 "
+                "HBM 수요가 시그널을 이끌고 있어요."
+            )
+        else:
+            st.markdown(
+                "현재 사이클 지표는 하락 구간을 시사하고 있어요 📉 "
+                "재고 조정 국면에 주의가 필요해요."
+            )
+
+    st.markdown("---")
+
+    # ── 🔍 세부 분석 아코디언 ──
+    st.markdown("#### 🔍 세부 분석")
+
+    with st.expander("📡 모델 성능 분석", expanded=False):
+        if expert_mode:
+            st.markdown(
+                f"**Hold-out 평가 결과** (`{metrics.get('period', '')}`)\n\n"
+                f"- 방향 정확도(전체): **{_fmt(dir_acc, pct=True)}**\n"
+                f"- 방향 정확도(Bear): **{_fmt(dir_bear, pct=True)}** ← 핵심 지표\n"
+                f"- RMSE: **{rmse:.3f}** · AsymLoss: **{asym:.3f}**\n"
+                f"- 평가 샘플 수: {n_ho}개"
+            )
+            bear_dir = dir_bear or 0
+            _signal_rows([
+                ("방향 정확도 (전체)", _fmt(dir_acc, pct=True),
+                 "up" if dir_acc >= 70 else "dn"),
+                ("방향 정확도 (Bear)", _fmt(dir_bear, pct=True),
+                 "up" if bear_dir >= 60 else ("neu" if bear_dir >= 40 else "dn")),
+                ("RMSE", f"{rmse:.3f}", "neu"),
+                ("AsymLoss", f"{asym:.3f}", "neu"),
+            ])
+        else:
+            st.markdown(
+                f"모델이 방향을 **{_fmt(dir_acc, pct=True)}** 정확도로 맞혔어요. "
+                f"Bear(하락) 구간 정확도는 **{_fmt(dir_bear, pct=True)}** 이에요."
+            )
+
+    with st.expander("📈 예측 vs 실제 흐름", expanded=False):
+        if expert_mode:
+            st.markdown("**Hold-out 구간 예측/실제값 (수치)**")
+            st.dataframe(out_df.style.format("{:.2f}"), use_container_width=True)
+        else:
+            st.markdown(
+                "최근 예측과 실제 흐름을 보여줘요. "
+                "초록 선이 실제, 파란 점선이 예측이에요."
+            )
+
+    with st.expander("⚠️ 리스크 & 주의사항", expanded=False):
+        if expert_mode:
+            bear_dir = dir_bear or 0
+            _signal_rows([
+                ("Bear DirAcc 안정성", _fmt(dir_bear, pct=True),
+                 "dn" if bear_dir < 60 else "up"),
+                ("RMSE 대비 예측 신뢰", f"{rmse:.2f}", "neu"),
+            ])
+            _caution_box(
+                "이 예측은 과거 데이터 패턴 기반의 통계 모델 출력값입니다. "
+                "규제 리스크, 지정학적 이벤트, 기업 내부 정보 등 구조적 변화는 "
+                "반영되지 않습니다. 투자 결정 시 이 수치만 단독으로 활용하지 마세요."
+            )
+        else:
+            st.markdown(
+                "이 예측은 참고용이에요. "
+                "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요. 🙏"
+            )
+
+    st.markdown("---")
+
+    # ── 🎯 신뢰도 바 ──
+    st.markdown("#### 🎯 모델 신뢰도")
+    conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
+    _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
+    if dir_bear is not None:
+        bear_color = (CLR_TEAL if dir_bear >= 60
+                      else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
+        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+        _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
 
 
 def render_confusion(df: pd.DataFrame):
-    """상승/하락 방향 혼동행렬."""
     yt, yp = df["실제값"].values, df["예측값"].values
     tp = int(((yt > 0) & (yp > 0)).sum())
     fp = int(((yt <= 0) & (yp > 0)).sum())
@@ -372,22 +661,10 @@ def render_confusion(df: pd.DataFrame):
         index=["실제 상승", "실제 하락"],
         columns=["예측 상승", "예측 하락"],
     )
-    st.dataframe(cm.style.background_gradient(cmap="Blues"), width='stretch')
-
-
-def render_shap_section(cfg: dict):
-    """알파 ①: SHAP 피처 중요도 (상위 10) — st.bar_chart 수평 막대."""
-    st.markdown("#### 🔬 SHAP 피처 중요도 (상위 10)")
-    st.caption("shap.TreeExplainer 기반 · 평균 |SHAP| 값이 클수록 예측 기여도가 큰 피처")
-    try:
-        shap_df = compute_shap_importance(cfg["model_path"], cfg["features_path"], cfg["target"])
-        st.bar_chart(shap_df, horizontal=True, height=360, color="#6366f1")
-    except Exception as e:
-        st.warning(f"SHAP 계산을 수행하지 못했습니다: {e}")
+    st.dataframe(cm.style.background_gradient(cmap="Blues"), use_container_width=True)
 
 
 def render_hit_history(out_df: pd.DataFrame, freq_label: str):
-    """알파 ②: 과거 분기/월별 예측 적중 히스토리 (✅/❌ 타임라인 + 상세표)."""
     st.markdown("#### 🎯 과거 적중 히스토리 (Hold-out)")
     d = out_df.copy()
     d["적중"] = (d["실제값"] > 0) == (d["예측값"] > 0)
@@ -400,8 +677,10 @@ def render_hit_history(out_df: pd.DataFrame, freq_label: str):
     with cB:
         timeline = " ".join("✅" if v else "❌" for v in d["적중"])
         st.markdown("**적중 타임라인** (왼쪽=과거 → 오른쪽=최근)")
-        st.markdown(f"<div style='font-size:1.5rem;letter-spacing:2px'>{timeline}</div>",
-                    unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:1.5rem;letter-spacing:2px'>{timeline}</div>",
+            unsafe_allow_html=True,
+        )
 
     table = pd.DataFrame({
         "예측 방향": ["📈 상승" if v > 0 else "📉 하락" for v in d["예측값"]],
@@ -411,14 +690,14 @@ def render_hit_history(out_df: pd.DataFrame, freq_label: str):
         "결과": ["✅" if v else "❌" for v in d["적중"]],
     }, index=d.index.strftime("%Y-%m"))
     with st.expander("적중 히스토리 상세"):
-        st.dataframe(table, width='stretch')
+        st.dataframe(table, use_container_width=True)
 
 
 # ──────────────────────────────────────────────────────────────────
-# 5. Stage별 화면
+# 6. Stage별 화면
 # ──────────────────────────────────────────────────────────────────
 
-def view_stage1():
+def view_stage1(expert_mode: bool = False):
     cfg = STAGE1
     st.header("📦 Stage 1 — 반도체 출하량(WW 매출) YoY 예측")
     st.caption(
@@ -434,7 +713,6 @@ def view_stage1():
         st.error(f"Stage 1 평가 중 오류가 발생했습니다: {e}")
         return
 
-    # ── 메인: 방향 예측 크게 ──
     render_direction_headline(df, cfg["value_label"])
 
     st.subheader("모델 성능 지표 (Hold-out)")
@@ -442,19 +720,17 @@ def view_stage1():
     render_metric_cards(metrics)
 
     st.subheader("예측 vs 실제 — Hold-out 타임라인")
-    st.line_chart(df, height=380)
+    render_ribbon_chart(df, metrics["rmse"])
 
-    with st.expander("Hold-out 예측 상세 데이터"):
-        st.dataframe(df.style.format("{:.2f}"), width='stretch')
+    render_detail_sections(metrics, df, "stage1", expert_mode)
 
-    # ── 알파 섹션 ──
     st.divider()
     st.subheader("✨ 알파 — 모델 해석 & 적중 히스토리")
     render_shap_section(cfg)
     render_hit_history(df, cfg["freq_label"])
 
 
-def view_stage2():
+def view_stage2(expert_mode: bool = False):
     cfg = STAGE2
     st.header("📈 Stage 2 — SK하이닉스 6개월 수익률 방향 예측")
     st.caption(
@@ -471,7 +747,6 @@ def view_stage2():
         st.error(f"Stage 2 평가 중 오류가 발생했습니다: {e}")
         return
 
-    # ── 메인: 방향 예측 크게 ──
     render_direction_headline(df, cfg["value_label"])
 
     st.subheader("모델 성능 지표 (Hold-out)")
@@ -481,15 +756,13 @@ def view_stage2():
     col_a, col_b = st.columns([2, 1])
     with col_a:
         st.subheader("예측 vs 실제 수익률 — Hold-out")
-        st.line_chart(df, height=360)
+        render_ribbon_chart(df, metrics["rmse"], height=360)
     with col_b:
         st.subheader("방향 예측 혼동행렬")
         render_confusion(df)
 
-    with st.expander("Hold-out 예측 상세 데이터"):
-        st.dataframe(df.style.format("{:.2f}"), width='stretch')
+    render_detail_sections(metrics, df, "stage2", expert_mode)
 
-    # ── 알파 섹션 ──
     st.divider()
     st.subheader("✨ 알파 — 모델 해석 & 적중 히스토리")
     render_shap_section(cfg)
@@ -497,7 +770,6 @@ def view_stage2():
 
 
 def _flow_box(title: str, subtitle: str, code: str):
-    """E2E 흐름 다이어그램의 한 칸 (테두리 컨테이너)."""
     with st.container(border=True):
         st.markdown(f"### {title}")
         st.markdown(f"**{subtitle}**")
@@ -512,7 +784,6 @@ def _flow_arrow():
 
 
 def render_market_signals():
-    """E2E ④: 현재 시장 신호 요약 카드 (KOSPI / SOX 모멘텀 + 종합 신호)."""
     st.subheader("④ 현재 시장 신호 요약")
     st.caption("실시간 시장 모멘텀과 모델 최신 예측으로 구성한 현재 종합 신호")
 
@@ -520,7 +791,6 @@ def render_market_signals():
     kospi_mom = mom.get("KOSPI")
     sox_mom   = mom.get("SOX")
 
-    # 모델의 현재 방향 신호 (Stage 2 최신 예측)
     model_up = None
     try:
         _, out2 = evaluate_stage(
@@ -542,7 +812,6 @@ def render_market_signals():
         st.metric("💽 SOX 모멘텀 (3M)", _mom_str(sox_mom),
                   delta=None if sox_mom is None else f"{sox_mom:+.1f}%")
 
-    # ── 종합 신호: 가용 신호의 방향을 다수결 집계 ──
     votes = []
     if kospi_mom is not None:
         votes.append(kospi_mom > 0)
@@ -557,9 +826,11 @@ def render_market_signals():
         else:
             pos = sum(votes)
             if pos > len(votes) / 2:
-                st.metric("🧭 종합 신호", "📈 상승 우세", delta=f"{pos}/{len(votes)} 신호 상승")
+                st.metric("🧭 종합 신호", "📈 상승 우세",
+                          delta=f"{pos}/{len(votes)} 신호 상승")
             elif pos < len(votes) / 2:
-                st.metric("🧭 종합 신호", "📉 하락 우세", delta=f"-{len(votes)-pos}/{len(votes)} 신호 하락")
+                st.metric("🧭 종합 신호", "📉 하락 우세",
+                          delta=f"-{len(votes)-pos}/{len(votes)} 신호 하락")
             else:
                 st.metric("🧭 종합 신호", "➖ 중립")
 
@@ -576,7 +847,6 @@ def view_e2e():
         "End-to-End 구조를 보여줍니다."
     )
 
-    # ── 흐름 다이어그램 (테두리 컨테이너 + 화살표) ──
     f1, fa, f2, fb, f3 = st.columns([4, 1, 4, 1, 4])
     with f1:
         _flow_box("🏭 Stage 1", "반도체 매출 YoY 예측", "best_xgboost_final.pkl")
@@ -591,7 +861,6 @@ def view_e2e():
 
     st.divider()
 
-    # ── ① Bridge: Stage1 예측값 시계열 ──
     st.subheader("① Stage 1 출력 — Expanding Window 예측 시계열")
     st.caption(
         f"각 관찰일 시점에서 lookahead 없이 재학습해 생성한 6개월 선행 "
@@ -600,16 +869,30 @@ def view_e2e():
     try:
         s1pred = load_csv(STAGE1_PRED_PATH)
         if BRIDGE_COL in s1pred.columns:
-            st.line_chart(s1pred[[BRIDGE_COL]].dropna(), height=300)
+            s1_data = s1pred[[BRIDGE_COL]].dropna()
+            fig = go.Figure(go.Scatter(
+                x=s1_data.index, y=s1_data[BRIDGE_COL],
+                line=dict(color=CLR_BLUE, width=2),
+                mode="lines+markers", marker=dict(size=4),
+            ))
+            fig.update_layout(
+                height=300,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+                margin=dict(l=0, r=0, t=8, b=0),
+                yaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
+                xaxis=dict(showgrid=False),
+            )
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f"`{BRIDGE_COL}` 컬럼을 찾을 수 없습니다.")
-            st.dataframe(s1pred.head(), width='stretch')
+            st.dataframe(s1pred.head(), use_container_width=True)
     except Exception as e:
         st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
 
     st.divider()
 
-    # ── ② 연결 검증 ──
     st.subheader("② Stage 2 입력 — Bridge 피처 결합 확인")
     try:
         s2feat = load_csv(STAGE2["features_path"])
@@ -618,7 +901,7 @@ def view_e2e():
                 f"✅ Stage 2 피처셋에 Stage 1 예측 피처 `{BRIDGE_COL}`가 포함되어 있습니다. "
                 "두 단계가 정상적으로 연결되었습니다."
             )
-            n_total = s2feat.shape[1]
+            n_total  = s2feat.shape[1]
             n_bridge = sum(1 for c in s2feat.columns if c.startswith("v2_pred"))
             m1, m2 = st.columns(2)
             m1.metric("Stage 2 전체 피처 수", f"{n_total}개")
@@ -630,7 +913,6 @@ def view_e2e():
 
     st.divider()
 
-    # ── ③ 두 단계 성능 요약 ──
     st.subheader("③ 두 단계 성능 요약")
     rows = []
     for cfg, with_ic in [(STAGE1, False), (STAGE2, True)]:
@@ -649,24 +931,25 @@ def view_e2e():
             })
         except Exception as e:
             rows.append({"단계": cfg["name"], "방향정확도(전체)": f"오류: {e}"})
-    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.divider()
-
-    # ── ④ 현재 시장 신호 요약 ──
     render_market_signals()
 
 
 # ──────────────────────────────────────────────────────────────────
-# 6. 메인
+# 7. 메인
 # ──────────────────────────────────────────────────────────────────
 
 def main():
-    # 산출물 확보 (실패 시 내부에서 st.stop())
+    _inject_styles()
     guard_artifacts()
 
     st.sidebar.title("📊 대시보드")
     st.sidebar.caption("반도체 사이클 → SK하이닉스 수익률 예측")
+
+    expert_mode = st.sidebar.toggle("🔬 전문가 모드", value=False)
+
     stage = st.sidebar.radio(
         "보기 선택",
         ["E2E 전체", "Stage 1", "Stage 2"],
@@ -680,12 +963,15 @@ def main():
         "3. **Stage 2** — SK하이닉스 6M 수익률 방향 예측"
     )
 
+    if expert_mode:
+        _expert_banner()
+
     st.title("반도체 사이클 기반 SK하이닉스 수익률 예측")
 
     if stage == "Stage 1":
-        view_stage1()
+        view_stage1(expert_mode)
     elif stage == "Stage 2":
-        view_stage2()
+        view_stage2(expert_mode)
     else:
         view_e2e()
 
