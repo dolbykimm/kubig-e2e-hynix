@@ -696,7 +696,8 @@ def render_hit_history(out_df: pd.DataFrame, freq_label: str):
 
 def view_stage1(expert_mode: bool = False):
     cfg = STAGE1
-    st.header("📦 Stage 1 — 반도체 출하량 YoY 예측")
+    st.header("📦 반도체 경기 예측 (6개월 뒤)")
+    st.caption("전 세계 반도체 매출이 1년 전보다 얼마나 늘지 예측해요. SK하이닉스 전망의 출발점이에요.")
 
     try:
         metrics, df = evaluate_stage(
@@ -726,7 +727,8 @@ def view_stage1(expert_mode: bool = False):
 
 def view_stage2(expert_mode: bool = False):
     cfg = STAGE2
-    st.header("📈 Stage 2 — SK하이닉스 6개월 수익률 예측")
+    st.header("📈 SK하이닉스 주가 전망 (6개월)")
+    st.caption("반도체 경기 예측을 바탕으로 SK하이닉스 주가가 오를지 내릴지 판단해요.")
 
     try:
         metrics, df = evaluate_stage(
@@ -758,11 +760,12 @@ def view_stage2(expert_mode: bool = False):
         render_hit_history(df, cfg["freq_label"])
 
 
-def _flow_box(title: str, subtitle: str, code: str):
+def _flow_box(title: str, subtitle: str, code: str = None):
     with st.container(border=True):
         st.markdown(f"### {title}")
         st.markdown(f"**{subtitle}**")
-        st.caption(f"`{code}`")
+        if code:
+            st.caption(f"`{code}`")
 
 
 def _flow_arrow():
@@ -773,8 +776,8 @@ def _flow_arrow():
 
 
 def render_market_signals():
-    st.subheader("④ 현재 시장 신호 요약")
-    st.caption("실시간 시장 모멘텀과 모델 최신 예측으로 구성한 현재 종합 신호")
+    st.subheader("📊 오늘의 시장 분위기")
+    st.caption("실시간 주식시장 흐름과 AI 예측을 합친 현재 종합 신호예요.")
 
     mom = get_market_momentum()
     kospi_mom = mom.get("KOSPI")
@@ -795,10 +798,10 @@ def render_market_signals():
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("🇰🇷 KOSPI 모멘텀 (3M)", _mom_str(kospi_mom),
+        st.metric("🇰🇷 코스피 (최근 3개월)", _mom_str(kospi_mom),
                   delta=None if kospi_mom is None else f"{kospi_mom:+.1f}%")
     with c2:
-        st.metric("💽 SOX 모멘텀 (3M)", _mom_str(sox_mom),
+        st.metric("💽 미국 반도체지수 (최근 3개월)", _mom_str(sox_mom),
                   delta=None if sox_mom is None else f"{sox_mom:+.1f}%")
 
     votes = []
@@ -824,29 +827,93 @@ def render_market_signals():
                 st.metric("🧭 종합 신호", "➖ 중립")
 
     st.caption(
-        "※ 종합 신호 = KOSPI·SOX 3개월 모멘텀 방향 + Stage 2 모델 최신 예측 방향의 다수결. "
-        "KOSPI/SOX는 yfinance 실시간(최대 1시간 캐시), 모델 신호는 hold-out 최신값 기준."
+        "※ 종합 신호 = 코스피·미국 반도체지수의 3개월 흐름 + AI 최신 예측을 합친 다수결이에요. "
+        "주가지수는 실시간(최대 1시간 단위 갱신), AI 신호는 최신 예측 기준이에요."
     )
 
 
-def view_e2e():
-    st.header("🔗 E2E — Stage 1 → Stage 2 파이프라인 흐름")
-    st.caption(
-        "Stage 1이 예측한 반도체 사이클 신호가 Stage 2의 입력 피처로 흘러들어가는 "
-        "End-to-End 구조를 보여줍니다."
-    )
+def _plain_acc(dir_acc) -> str:
+    n = round((dir_acc or 0) / 10)
+    return f"과거 검증에서 **10번 중 약 {n}번** 방향을 맞혔어요."
+
+
+def view_home(expert_mode: bool = False):
+    """🏠 한눈에 보기 — 결론 · 시장 분위기 · 신뢰도를 한 페이지로."""
+    try:
+        m2, df2 = evaluate_stage(
+            STAGE2["features_path"], STAGE2["model_path"],
+            STAGE2["target"], STAGE2["test_eval"], with_ic=True,
+        )
+    except Exception as e:
+        st.error(f"예측 결과를 불러오지 못했습니다: {e}")
+        return
+
+    up = float(df2["예측값"].iloc[-1]) > 0
+
+    # ── 결론 (가장 중요) ──
+    st.markdown("### 🔮 앞으로 6개월, SK하이닉스 주가는 오를까요?")
+    render_direction_headline(df2, STAGE2["value_label"])
+
+    takeaway = ("AI는 향후 6개월 SK하이닉스 주가가 **오를 가능성**이 높다고 봐요."
+                if up else
+                "AI는 향후 6개월 SK하이닉스 주가가 **내릴 가능성**이 높다고 봐요.")
+    st.info(f"{takeaway}  \n{_plain_acc(m2['dir_acc'])}")
+
+    # ── 예측 과정 (쉬운 3단계) ──
+    st.markdown("#### 🧭 이렇게 예측해요")
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        with st.container(border=True):
+            st.markdown("##### 🌐 1. 반도체 경기")
+            st.caption("전 세계 반도체가 6개월 뒤 얼마나 팔릴지 예측해요.")
+    with s2:
+        with st.container(border=True):
+            st.markdown("##### 🔗 2. 신호 연결")
+            st.caption("반도체 경기 예측을 SK하이닉스 분석에 연결해요.")
+    with s3:
+        with st.container(border=True):
+            st.markdown("##### 📈 3. 주가 전망")
+            st.caption("SK하이닉스 주가가 오를지 내릴지 최종 판단해요.")
+
+    st.divider()
+    render_market_signals()
+
+    st.divider()
+    with st.expander("🎯 이 예측, 얼마나 믿을 수 있나요?"):
+        dir_acc  = m2.get("dir_acc", 0)
+        dir_bear = m2.get("dir_bear")
+        st.markdown(_plain_acc(dir_acc))
+        conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
+        _confidence_bar(dir_acc, "전체 방향 정확도", conf_color)
+        if dir_bear is not None:
+            bear_color = (CLR_TEAL if dir_bear >= 60
+                          else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
+            st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+            _confidence_bar(dir_bear, "하락장에서의 정확도", bear_color)
+        st.caption("‘검증’은 모델이 학습에 쓰지 않은 최근 데이터로 시험 본 결과예요. "
+                   "참고용이며 투자 권유가 아니에요.")
+
+    st.caption("👈 왼쪽 메뉴에서 단계별 상세 분석과 차트를 볼 수 있어요.")
+
+
+def view_e2e(expert_mode: bool = False):
+    st.header("🔗 예측은 어떻게 작동하나요?")
+    st.caption("반도체 경기 예측이 SK하이닉스 주가 전망으로 이어지는 전체 과정을 보여줘요.")
 
     f1, fa, f2, fb, f3 = st.columns([4, 1, 4, 1, 4])
     with f1:
-        _flow_box("🏭 Stage 1", "반도체 매출 YoY 예측", "best_xgboost_final.pkl")
+        _flow_box("🌐 1단계", "반도체 경기 예측",
+                  "best_xgboost_final.pkl" if expert_mode else None)
     with fa:
         _flow_arrow()
     with f2:
-        _flow_box("🔌 Bridge 피처", "Stage 1 예측값 전달", BRIDGE_COL)
+        _flow_box("🔗 연결", "예측 결과를 다음 단계로 전달",
+                  BRIDGE_COL if expert_mode else None)
     with fb:
         _flow_arrow()
     with f3:
-        _flow_box("💹 Stage 2", "SK하이닉스 수익률 예측", "skh_xgb_final.pkl")
+        _flow_box("📈 2단계", "SK하이닉스 주가 전망",
+                  "skh_xgb_final.pkl" if expert_mode else None)
 
     st.divider()
 
@@ -922,22 +989,25 @@ def main():
     _inject_styles()
     guard_artifacts()
 
-    st.sidebar.title("📊 대시보드")
-    st.sidebar.caption("반도체 사이클 → SK하이닉스 수익률 예측")
+    st.sidebar.title("📈 SK하이닉스 주가 전망")
+    st.sidebar.caption("반도체 경기로 6개월 뒤 주가 방향을 예측해요")
 
-    expert_mode = st.sidebar.toggle("🔬 전문가 모드", value=False)
-
-    stage = st.sidebar.radio(
-        "보기 선택",
-        ["E2E 전체", "Stage 1", "Stage 2"],
+    view = st.sidebar.radio(
+        "메뉴",
+        ["🏠 한눈에 보기", "📈 SK하이닉스 전망", "📦 반도체 경기", "🔗 작동 원리"],
         index=0,
     )
+
+    st.sidebar.divider()
+    expert_mode = st.sidebar.toggle("🔬 전문가 모드", value=False)
+    st.sidebar.caption("SHAP·RMSE 등 전문 지표와 상세 수치를 함께 보여줘요.")
+
     st.sidebar.divider()
     st.sidebar.markdown(
-        "**파이프라인 개요**\n\n"
-        "1. **Stage 1** — 반도체 매출 YoY(6M 선행) 예측\n"
-        "2. **Bridge** — 예측값을 Stage 2 피처로 전달\n"
-        "3. **Stage 2** — SK하이닉스 6M 수익률 방향 예측"
+        "**예측 3단계**\n\n"
+        "1. 🌐 반도체 경기 예측\n"
+        "2. 🔗 신호 연결\n"
+        "3. 📈 SK하이닉스 주가 전망"
     )
 
     if expert_mode:
@@ -945,12 +1015,14 @@ def main():
 
     st.title("반도체 사이클 기반 SK하이닉스 수익률 예측")
 
-    if stage == "Stage 1":
-        view_stage1(expert_mode)
-    elif stage == "Stage 2":
+    if view.startswith("🏠"):
+        view_home(expert_mode)
+    elif view.startswith("📈"):
         view_stage2(expert_mode)
+    elif view.startswith("📦"):
+        view_stage1(expert_mode)
     else:
-        view_e2e()
+        view_e2e(expert_mode)
 
 
 if __name__ == "__main__":
