@@ -7,6 +7,7 @@ Stage 1 (반도체 출하량 YoY 예측) → Stage 2 (SK하이닉스 6개월 수
 
 import os
 import pickle
+import re
 from datetime import datetime, timezone, timedelta
 
 import numpy as np
@@ -563,7 +564,8 @@ def render_metric_cards(metrics: dict, with_ic: bool = False):
             _kpi("Hold-out 구간", f"{metrics['n_holdout']}개")
 
 
-_FEAT_BASE = {
+_FEAT_EXACT = {
+    # FRED 경제지표
     "FRED_SemiProd":         "반도체 생산지수 (미국)",
     "FRED_ISM_Mfg":          "ISM 제조업 지수",
     "FRED_T10Y2Y":           "장단기 금리차 (10년-2년)",
@@ -572,33 +574,132 @@ _FEAT_BASE = {
     "FRED_MfgEmp":           "제조업 고용",
     "FRED_ConsSenti":        "소비자 심리지수",
     "FRED_NewOrder":         "제조업 신규 주문",
+    # 주식 수익률
     "Ret_SOX":               "미국 반도체지수 (SOX)",
     "Ret_NVDA":              "NVIDIA 수익률",
     "Ret_TSM":               "TSMC 수익률",
     "Ret_ASML":              "ASML 수익률",
     "Ret_Samsung":           "삼성전자 수익률",
     "Ret_SKHynix":           "SK하이닉스 수익률",
+    # WSTS 집계
     "wsts_Worldwide_YoY":    "전세계 반도체 매출 YoY",
     "wsts_Asia_Pacific_YoY": "아태지역 반도체 매출 YoY",
-    "v2_pred_ww_yoy":        "AI 반도체 경기 예측 (Stage 1)",
+    # Bridge
+    "v2_pred_ww_yoy":        "AI 반도체 경기 예측",
 }
-_FEAT_SUFFIX = [
-    ("_MA12", " (12개월 평균)"),
-    ("_MA6",  " (6개월 평균)"),
-    ("_MA3",  " (3개월 평균)"),
-    ("_vol6", " (6개월 변동성)"),
-    ("_vol3", " (3개월 변동성)"),
-    ("_lag12"," (12개월 전)"),
-    ("_lag6", " (6개월 전)"),
-    ("_YoY",  " YoY"),
-]
+
+_REGION_KO = {
+    "worldwide":    "전세계",
+    "americas":     "미주",
+    "europe":       "유럽",
+    "japan":        "일본",
+    "asia_pacific": "아태지역",
+}
+
+_FRED_KO = {
+    "semiprod":   "반도체 생산지수",
+    "ism_mfg":    "ISM 제조업 지수",
+    "t10y2y":     "장단기 금리차",
+    "indprod":    "산업생산지수",
+    "pce_core":   "근원 PCE",
+    "mfgemp":     "제조업 고용",
+    "conssenti":  "소비자 심리",
+    "neworder":   "신규 주문",
+}
+
+_TICKER_KO = {
+    "sox":      "SOX (반도체지수)",
+    "nvda":     "NVIDIA",
+    "tsm":      "TSMC",
+    "asml":     "ASML",
+    "samsung":  "삼성전자",
+    "skhynix":  "SK하이닉스",
+}
+
 
 def _translate_feat(name: str) -> str:
-    for suffix, label in _FEAT_SUFFIX:
-        if name.endswith(suffix):
-            base = name[: -len(suffix)]
-            return _FEAT_BASE.get(base, base) + label
-    return _FEAT_BASE.get(name, name)
+    # 1) 완전 일치
+    if name in _FEAT_EXACT:
+        return _FEAT_EXACT[name]
+
+    low = name.lower()
+
+    # 2) FRED_ 계열
+    if low.startswith("fred_"):
+        rest = low[5:]
+        for key, ko in _FRED_KO.items():
+            if rest.startswith(key):
+                suffix = rest[len(key):]
+                return ko + _suffix_ko(suffix)
+        return "경제지표 " + rest
+
+    # 3) Ret_ 계열
+    if low.startswith("ret_"):
+        rest = low[4:]
+        for key, ko in _TICKER_KO.items():
+            if rest.startswith(key):
+                suffix = rest[len(key):]
+                return ko + " 수익률" + _suffix_ko(suffix)
+        return rest + " 수익률"
+
+    # 4) wsts_ 계열
+    if low.startswith("wsts_"):
+        rest = low[5:]
+        for region, ko in _REGION_KO.items():
+            if rest.startswith(region):
+                suffix = rest[len(region):]
+                return ko + " 반도체 매출" + _suffix_ko(suffix)
+        return "반도체 매출 " + rest
+
+    # 5) 지역명으로 시작하는 파생 피처 (예: europe_yoy_vs_ma24)
+    for region, ko in _REGION_KO.items():
+        if low.startswith(region):
+            rest = low[len(region):].lstrip("_")
+            return ko + " " + _metric_ko(rest)
+
+    # 6) v2_pred 계열
+    if low.startswith("v2_pred"):
+        return "AI 반도체 경기 예측" + _suffix_ko(low[7:])
+
+    # 7) 번역 불가 → 원본 반환
+    return name
+
+
+def _suffix_ko(s: str) -> str:
+    s = s.lstrip("_").lower()
+    if not s:
+        return ""
+    m = re.match(r"ma(\d+)$", s)
+    if m:
+        return f" ({m.group(1)}개월 평균)"
+    m = re.match(r"vol(\d+)$", s)
+    if m:
+        return f" ({m.group(1)}개월 변동성)"
+    m = re.match(r"lag(\d+)$", s)
+    if m:
+        return f" ({m.group(1)}개월 전)"
+    if s == "yoy":
+        return " YoY"
+    return f" ({s})"
+
+
+def _metric_ko(s: str) -> str:
+    s = s.lower()
+    m = re.match(r"yoy_vs_ma(\d+)", s)
+    if m:
+        return f"YoY vs {m.group(1)}개월 평균"
+    m = re.match(r"yoy_ma(\d+)", s)
+    if m:
+        return f"YoY {m.group(1)}개월 평균"
+    m = re.match(r"yoy_vol(\d+)", s)
+    if m:
+        return f"YoY {m.group(1)}개월 변동성"
+    m = re.match(r"yoy_lag(\d+)", s)
+    if m:
+        return f"YoY {m.group(1)}개월 전"
+    if s == "yoy":
+        return "YoY"
+    return _suffix_ko(s).strip(" ()")
 
 
 def render_shap_section(cfg: dict):
