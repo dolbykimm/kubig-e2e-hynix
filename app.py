@@ -7,11 +7,14 @@ Stage 1 (반도체 출하량 YoY 예측) → Stage 2 (SK하이닉스 6개월 수
 
 import os
 import pickle
+from datetime import datetime, timezone, timedelta
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+KST = timezone(timedelta(hours=9))
 
 # ── 페이지 설정 (반드시 첫 Streamlit 호출) ──────────────────────────
 st.set_page_config(
@@ -416,13 +419,13 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
     fig.add_trace(go.Scatter(
         x=dates + dates[::-1],
         y=upper95 + lower95[::-1],
-        fill="toself", fillcolor="rgba(29,158,117,0.10)",
+        fill="toself", fillcolor="rgba(150,150,150,0.12)",
         line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="95% CI",
     ))
     fig.add_trace(go.Scatter(
         x=dates + dates[::-1],
         y=upper80 + lower80[::-1],
-        fill="toself", fillcolor="rgba(29,158,117,0.22)",
+        fill="toself", fillcolor="rgba(120,120,120,0.22)",
         line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="80% CI",
     ))
     fig.add_trace(go.Scatter(
@@ -458,8 +461,8 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
     st.markdown(_chart_legend(
         ("실제값", "#d4f5e7", "#0a6e48"),
         ("예측 중앙값", BG_BLUE, "#185FA5"),
-        ("80% 신뢰구간", BG_GREEN, "#3B6D11"),
-        ("95% 신뢰구간", BG_TEAL, "#085041"),
+        ("80% 신뢰구간", "#ebebeb", "#555"),
+        ("95% 신뢰구간", "#f2f2f2", "#888"),
     ), unsafe_allow_html=True)
 
 
@@ -477,6 +480,8 @@ def render_direction_headline(out_df: pd.DataFrame, value_label: str):
     color  = CLR_TEAL if up else CLR_RED
     bg     = BG_TEAL  if up else BG_RED
 
+    target_date = date + pd.DateOffset(months=6)
+
     direction_pill = _pill("▲ 상승 전망" if up else "▼ 하락 전망", bg, color)
     ai_pill        = _pill("AI 예측", BG_BLUE, "#185FA5")
 
@@ -490,7 +495,11 @@ def render_direction_headline(out_df: pd.DataFrame, value_label: str):
         f"</div>",
         unsafe_allow_html=True,
     )
-    st.caption(f"📅 기준 시점 **{date.date()}** · {value_label} **{pred:+.2f}%**")
+    st.caption(
+        f"📅 **{date.strftime('%Y년 %m월')}까지의 데이터** 기준 → "
+        f"**{target_date.strftime('%Y년 %m월')} 방향** 예측 · "
+        f"{value_label} {pred:+.2f}%"
+    )
 
 
 def _kpi(label: str, value: str, pill_text: str = None,
@@ -548,24 +557,63 @@ def render_metric_cards(metrics: dict, with_ic: bool = False):
             _kpi("Hold-out 구간", f"{metrics['n_holdout']}개")
 
 
+_FEAT_BASE = {
+    "FRED_SemiProd":         "반도체 생산지수 (미국)",
+    "FRED_ISM_Mfg":          "ISM 제조업 지수",
+    "FRED_T10Y2Y":           "장단기 금리차 (10년-2년)",
+    "FRED_IndProd":          "산업생산지수 (미국)",
+    "FRED_PCE_Core":         "근원 PCE 물가",
+    "FRED_MfgEmp":           "제조업 고용",
+    "FRED_ConsSenti":        "소비자 심리지수",
+    "FRED_NewOrder":         "제조업 신규 주문",
+    "Ret_SOX":               "미국 반도체지수 (SOX)",
+    "Ret_NVDA":              "NVIDIA 수익률",
+    "Ret_TSM":               "TSMC 수익률",
+    "Ret_ASML":              "ASML 수익률",
+    "Ret_Samsung":           "삼성전자 수익률",
+    "Ret_SKHynix":           "SK하이닉스 수익률",
+    "wsts_Worldwide_YoY":    "전세계 반도체 매출 YoY",
+    "wsts_Asia_Pacific_YoY": "아태지역 반도체 매출 YoY",
+    "v2_pred_ww_yoy":        "AI 반도체 경기 예측 (Stage 1)",
+}
+_FEAT_SUFFIX = [
+    ("_MA12", " (12개월 평균)"),
+    ("_MA6",  " (6개월 평균)"),
+    ("_MA3",  " (3개월 평균)"),
+    ("_vol6", " (6개월 변동성)"),
+    ("_vol3", " (3개월 변동성)"),
+    ("_lag12"," (12개월 전)"),
+    ("_lag6", " (6개월 전)"),
+    ("_YoY",  " YoY"),
+]
+
+def _translate_feat(name: str) -> str:
+    for suffix, label in _FEAT_SUFFIX:
+        if name.endswith(suffix):
+            base = name[: -len(suffix)]
+            return _FEAT_BASE.get(base, base) + label
+    return _FEAT_BASE.get(name, name)
+
+
 def render_shap_section(cfg: dict):
-    st.markdown("#### 🔬 SHAP 피처 중요도 (상위 10)")
-    st.caption("평균 |SHAP| 값이 클수록 예측에 더 많이 기여한 피처")
+    st.markdown("#### 🔬 예측에 영향을 준 주요 지표 (상위 10)")
+    st.caption("막대가 길수록 해당 지표가 이번 예측에 더 크게 영향을 미쳤어요.")
     try:
         shap_df = compute_shap_importance(cfg["model_path"], cfg["features_path"], cfg["target"])
+        labels = [_translate_feat(n) for n in shap_df.index.tolist()]
         fig = go.Figure(go.Bar(
             x=shap_df["평균 |SHAP|"].values,
-            y=shap_df.index.tolist(),
+            y=labels,
             orientation="h",
             marker_color=CLR_BLUE,
         ))
         fig.update_layout(
-            height=360,
+            height=380,
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=0, r=0, t=8, b=0),
-            yaxis=dict(autorange="reversed", gridcolor="rgba(0,0,0,0)"),
-            xaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
+            margin=dict(l=0, r=16, t=8, b=0),
+            yaxis=dict(autorange="reversed", gridcolor="rgba(0,0,0,0)", tickfont=dict(size=12)),
+            xaxis=dict(gridcolor="rgba(136,135,128,0.15)", title="영향도"),
         )
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
@@ -823,9 +871,11 @@ def render_market_signals():
     with c1:
         st.metric("🇰🇷 코스피 (최근 3개월)", _mom_str(kospi_mom),
                   delta=None if kospi_mom is None else f"{kospi_mom:+.1f}%")
+        st.caption("실시간 · 최대 1시간 전 데이터")
     with c2:
         st.metric("💽 미국 반도체지수 (최근 3개월)", _mom_str(sox_mom),
                   delta=None if sox_mom is None else f"{sox_mom:+.1f}%")
+        st.caption("실시간 · 최대 1시간 전 데이터")
 
     votes = []
     if kospi_mom is not None:
@@ -848,6 +898,7 @@ def render_market_signals():
                           delta=f"-{len(votes)-pos}/{len(votes)} 신호 하락")
             else:
                 st.metric("🧭 종합 신호", "➖ 중립")
+        st.caption("AI 신호는 2025년 10월 모델 기준")
 
     st.caption(
         "※ 종합 신호 = 코스피·미국 반도체지수의 3개월 흐름 + AI 최신 예측을 합친 다수결이에요. "
@@ -1031,6 +1082,16 @@ def main():
         "1. 🌐 반도체 경기 예측\n"
         "2. 🔗 신호 연결\n"
         "3. 📈 SK하이닉스 주가 전망"
+    )
+    st.sidebar.divider()
+    now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+    st.sidebar.markdown(
+        f"<div style='font-size:11px;color:#999;line-height:1.8'>"
+        f"📡 <b>코스피·SOX</b>: 실시간 (1시간 갱신)<br>"
+        f"🤖 <b>AI 예측 기준</b>: 2025년 10월<br>"
+        f"🕐 <b>페이지 로드</b>: {now_kst}"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
     if expert_mode:
