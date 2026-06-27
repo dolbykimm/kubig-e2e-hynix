@@ -42,7 +42,6 @@ W_BULL_CORRECT, W_BULL_WRONG = 1.0, 2.0
 W_BEAR_CORRECT, W_BEAR_WRONG = 1.5, 3.0
 BEAR_SAMPLE_W = 2.0
 
-# ── 컬러 팔레트 ───────────────────────────────────────────────────
 CLR_BLUE  = "#2a78d6"
 CLR_TEAL  = "#1D9E75"
 CLR_RED   = "#E24B4A"
@@ -86,10 +85,6 @@ BRIDGE_COL = "v2_pred_ww_yoy"
 
 @st.cache_resource(show_spinner="S3에서 모델/데이터 산출물을 내려받는 중...")
 def download_artifacts():
-    """
-    S3에서 ARTIFACTS를 APP_ROOT 하위로 다운로드한다.
-    세션당 1회만 실행되도록 cache_resource로 캐싱.
-    """
     bucket = os.getenv("S3_BUCKET_NAME")
     if not bucket:
         return {"status": "no_bucket", "missing": [], "error": None}
@@ -130,7 +125,6 @@ def download_artifacts():
 
 
 def guard_artifacts():
-    """다운로드 결과를 검사하고, 문제가 있으면 안내 후 대시보드를 중단한다."""
     result = download_artifacts()
     status = result["status"]
 
@@ -210,6 +204,7 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, with_ic: bool = Fals
 @st.cache_data(show_spinner="모델 성능을 평가하는 중...")
 def evaluate_stage(features_path: str, model_path: str, target: str,
                    test_eval: int, with_ic: bool = False):
+    """백테스트용: hold-out 구간에서 re-train → predict → 성능 지표 반환."""
     import xgboost as xgb
 
     bundle  = load_model(model_path)
@@ -219,7 +214,7 @@ def evaluate_stage(features_path: str, model_path: str, target: str,
 
     df = load_csv(features_path)
     use_feats = [f for f in feats if f in df.columns]
-    df_clean  = df.dropna(subset=[target])
+    df_clean  = df.dropna(subset=[target])      # 타겟 있는 행만 (미래 행 제외)
     X = df_clean[use_feats].ffill().fillna(0)
     y = df_clean[target]
 
@@ -239,6 +234,31 @@ def evaluate_stage(features_path: str, model_path: str, target: str,
 
     out = pd.DataFrame({"실제값": y_ho.values, "예측값": preds}, index=y_ho.index)
     return metrics, out
+
+
+@st.cache_data(show_spinner=False)
+def get_latest_forecast(features_path: str, model_path: str) -> dict:
+    """
+    진짜 현재 예측: 최종 학습 모델(bundle['model'])로
+    타겟 NaN 여부와 무관하게 가장 최신 피처 행을 추론한다.
+
+    기존 evaluate_stage()는 hold-out 재학습용이므로 미래 행(타겟 NaN)을 dropna로 버린다.
+    여기서는 버리지 않고 가장 최신 행을 그대로 입력해 미래 방향을 예측한다.
+    """
+    bundle = load_model(model_path)
+    model  = bundle["model"]
+    feats  = bundle["feature_names"]
+
+    df = load_csv(features_path)
+    use_feats = [f for f in feats if f in df.columns]
+    X = df[use_feats].ffill().fillna(0)     # dropna 없음 — 최신 행 포함
+
+    latest_X = X.iloc[[-1]]
+    pred     = float(model.predict(latest_X)[0])
+    date     = X.index[-1]
+    target_date = date + pd.DateOffset(months=6)
+
+    return {"pred": pred, "date": date, "target_date": target_date}
 
 
 @st.cache_data(show_spinner="SHAP 피처 중요도 계산 중...")
@@ -302,51 +322,217 @@ def _fmt_bear(v):
 
 
 def _pill(text: str, bg: str, fg: str) -> str:
-    return (
-        f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:500;"
-        f"padding:3px 10px;border-radius:20px;white-space:nowrap'>{text}</span>"
-    )
+    return f"<span class='pill' style='background:{bg};color:{fg}'>{text}</span>"
 
 
 def _chart_legend(*items) -> str:
     badges = " ".join(_pill(label, bg, fg) for label, bg, fg in items)
-    return f"<div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'>{badges}</div>"
+    return f"<div class='chart-legend'>{badges}</div>"
 
 
 def _inject_styles():
     st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* ─── Base typography ─── */
+html, body, [class*="css"], .stMarkdown, .element-container {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+.block-container { padding-top: 1.6rem !important; }
+
+/* ─── Pill / badge ─── */
+.pill {
+  display: inline-block;
+  font-size: 11px; font-weight: 500;
+  padding: 4px 12px; border-radius: 20px;
+  white-space: nowrap; line-height: 1.4;
+}
+
+/* ─── Chart legend ─── */
+.chart-legend {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin: 8px 0 4px 2px;
+}
+
+/* ─── Page title block ─── */
+.page-title {
+  font-size: 1.45rem; font-weight: 700;
+  color: var(--text-color, #1a1a2e);
+  letter-spacing: -0.025em; line-height: 1.2;
+  margin-bottom: 2px;
+}
+.page-sub {
+  font-size: 13px; color: #999; margin-bottom: 20px;
+}
+
+/* ─── Hero card ─── */
+.hero-card {
+  border-radius: 20px;
+  padding: 40px 28px 32px;
+  text-align: center;
+  margin: 4px 0 12px;
+}
+.hero-card.up {
+  background: linear-gradient(145deg, rgba(29,158,117,0.10) 0%, rgba(20,140,100,0.05) 100%);
+  border: 1.5px solid rgba(29,158,117,0.25);
+}
+.hero-card.dn {
+  background: linear-gradient(145deg, rgba(226,75,74,0.10) 0%, rgba(200,50,50,0.05) 100%);
+  border: 1.5px solid rgba(226,75,74,0.25);
+}
+.hero-emoji { font-size: 2.6rem; line-height: 1; margin-bottom: 8px; }
+.hero-direction {
+  font-size: 2.8rem; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 14px;
+}
+.hero-direction.up { color: #0a6e45; }
+.hero-direction.dn { color: #b02020; }
+.hero-badges { display: flex; gap: 8px; justify-content: center; }
+
+/* ─── Forecast note ─── */
+.forecast-note {
+  font-size: 11px; color: #aaa; text-align: center;
+  margin-top: 6px; margin-bottom: 2px;
+}
+
+/* ─── Step flow ─── */
+.step-flow {
+  display: flex; align-items: center;
+  gap: 0; margin: 10px 0 20px;
+}
+.step-card {
+  flex: 1;
+  background: var(--secondary-background-color, #f8f9fb);
+  border: 1px solid rgba(0,0,0,0.07);
+  border-radius: 12px; padding: 20px 14px; text-align: center;
+}
+.step-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: #2a78d6; color: #fff;
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 8px;
+}
+.step-icon { font-size: 1.4rem; margin-bottom: 6px; }
+.step-title { font-size: 13px; font-weight: 600; color: var(--text-color, #1a1a2e); margin-bottom: 4px; }
+.step-desc { font-size: 11px; color: #888; line-height: 1.5; }
+.step-arrow { font-size: 1.4rem; color: #ccc; padding: 0 8px; flex-shrink: 0; }
+
+/* ─── Info box ─── */
+.info-box {
+  background: rgba(42,120,214,0.07);
+  border: 1px solid rgba(42,120,214,0.18);
+  border-radius: 10px; padding: 14px 18px; margin: 12px 0;
+  font-size: 13px; color: #185FA5; line-height: 1.75;
+}
+
+/* ─── Signal cards ─── */
+.sig-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 14px; margin: 10px 0 6px;
+}
+.sig-card {
+  background: var(--background-color, #ffffff);
+  border: 1px solid rgba(0,0,0,0.07);
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  padding: 18px 16px 14px;
+}
+.sig-icon { font-size: 1.2rem; margin-bottom: 4px; }
+.sig-name { font-size: 12px; font-weight: 500; color: var(--text-color, #1a1a2e); margin-bottom: 1px; }
+.sig-period { font-size: 10px; color: #bbb; margin-bottom: 10px; }
+.sig-val {
+  font-size: 1.6rem; font-weight: 700; line-height: 1;
+  margin-bottom: 6px; font-variant-numeric: tabular-nums;
+}
+.sig-val.up  { color: #1D9E75; }
+.sig-val.dn  { color: #E24B4A; }
+.sig-val.neu { color: #EF9F27; }
+.sig-val.na  { color: #bbb; }
+.sig-sub { font-size: 10px; color: #bbb; }
+
+/* ─── KPI cards ─── */
+.kpi-card {
+  background: var(--secondary-background-color, #f8f9fb);
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.06);
+  padding: 16px 18px; height: 100%;
+}
+.kpi-label {
+  font-size: 10.5px; font-weight: 600; color: #aaa;
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;
+}
+.kpi-value {
+  font-size: 22px; font-weight: 600;
+  color: var(--text-color, #111); margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Confidence bar ─── */
+.cb-label { display:flex; justify-content:space-between; font-size:12px; color:#888; margin-bottom:5px; }
+.cb-track { height:6px; border-radius:3px; background:rgba(0,0,0,0.08); overflow:hidden; margin-bottom:10px; }
+.cb-fill  { height:100%; border-radius:3px; }
+
+/* ─── Signal rows (inside expanders) ─── */
 .signal-row {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0; border-bottom: 0.5px solid rgba(136,135,128,0.25);
+  padding: 10px 0; border-bottom: 1px solid rgba(0,0,0,0.05);
 }
 .signal-row:last-child { border-bottom: none; }
-.signal-label { font-size: 13px; color: var(--text-secondary, #555); }
-.signal-val   { font-size: 13px; font-weight: 500; }
+.signal-label { font-size: 13px; color: #666; }
+.signal-val   { font-size: 13px; font-weight: 600; }
 .signal-val.up  { color: #1D9E75; }
 .signal-val.dn  { color: #E24B4A; }
 .signal-val.neu { color: #EF9F27; }
 
-.cb-label { display:flex; justify-content:space-between; font-size:12px;
-            color:#888; margin-bottom:5px; }
-.cb-track { height:8px; border-radius:4px; background:rgba(136,135,128,0.2); overflow:hidden; }
-.cb-fill  { height:100%; border-radius:4px; }
+/* ─── Caution box ─── */
+.caution-box {
+  background: #fffbf2;
+  border: 1px solid rgba(239,159,39,0.25);
+  border-left: 3px solid #EF9F27;
+  border-radius: 8px; padding: 14px 16px; margin-top: 12px;
+}
+.caution-box .c-title { font-size: 12px; font-weight: 600; color: #854F0B; margin-bottom: 6px; }
+.caution-box .c-body  { font-size: 12px; color: #633806; line-height: 1.7; }
 
-.caution-box { background:#faeeda; border-radius:10px; padding:14px; margin-top:12px; }
-.caution-box .c-title { font-size:12px; font-weight:500; color:#854F0B; margin-bottom:6px; }
-.caution-box .c-body  { font-size:12px; color:#633806; line-height:1.7; }
+/* ─── Expert banner ─── */
+.expert-banner {
+  background: linear-gradient(135deg, #e6f1fb 0%, #d8eaf8 100%);
+  border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+  border-left: 3px solid #2a78d6;
+}
+.eb-title { font-size: 13px; font-weight: 600; color: #0C447C; margin-bottom: 2px; }
+.eb-body  { font-size: 12px; color: #185FA5; line-height: 1.6; }
 
-.expert-banner { background:#e6f1fb; border-radius:10px; padding:12px 16px;
-                 margin-bottom:16px; border-left:3px solid #2a78d6; }
-.eb-title { font-size:13px; font-weight:500; color:#0C447C; margin-bottom:2px; }
-.eb-body  { font-size:12px; color:#185FA5; line-height:1.6; }
+/* ─── Flow cards (E2E view) ─── */
+.flow-card {
+  background: var(--secondary-background-color, #f8f9fb);
+  border: 1px solid rgba(0,0,0,0.07);
+  border-radius: 12px; padding: 22px 16px; text-align: center;
+}
+.fc-step {
+  font-size: 10px; font-weight: 700; color: #2a78d6;
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px;
+}
+.fc-icon { font-size: 1.6rem; margin-bottom: 6px; }
+.fc-title { font-size: 14px; font-weight: 600; color: var(--text-color, #1a1a2e); }
+.fc-code {
+  font-size: 10px; color: #aaa; margin-top: 8px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
 
-.kpi-card { background:var(--secondary-background-color,#f8f9fa);
-            border-radius:10px; border:0.5px solid rgba(136,135,128,0.25);
-            padding:14px 16px; }
-.kpi-label { font-size:12px; color:#888; margin-bottom:4px; }
-.kpi-value { font-size:22px; font-weight:500; color:var(--text-color,#111);
-             margin-bottom:6px; }
+/* ─── Sidebar ─── */
+[data-testid="stSidebar"] {
+  border-right: 1px solid rgba(0,0,0,0.06) !important;
+}
+.sidebar-footer {
+  font-size: 11px; color: #bbb; line-height: 2; padding: 4px 0;
+}
+.sidebar-footer b { color: #999; font-weight: 500; }
+
+/* ─── Streamlit element tweaks ─── */
+.stExpander > details > summary { font-size: 13px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -364,7 +550,7 @@ def _confidence_bar(pct: float, label: str, color: str = CLR_BLUE):
     st.markdown(f"""
 <div class="cb-label">
   <span>{label}</span>
-  <span style="color:{color};font-weight:500">{pct:.0f}%</span>
+  <span style="color:{color};font-weight:600">{pct:.0f}%</span>
 </div>
 <div class="cb-track">
   <div class="cb-fill" style="width:{pct:.0f}%;background:{color}"></div>
@@ -415,7 +601,6 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
 
     fig = go.Figure()
 
-    # ── 상승/하락 영역 배경 shading ──
     fig.add_shape(type="rect", xref="paper", yref="y",
         x0=0, x1=1, y0=0, y1=y_hi,
         fillcolor="rgba(29,158,117,0.04)", line_width=0, layer="below")
@@ -424,14 +609,12 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
         fillcolor="rgba(226,75,74,0.04)", line_width=0, layer="below")
 
     fig.add_trace(go.Scatter(
-        x=dates + dates[::-1],
-        y=upper95 + lower95[::-1],
+        x=dates + dates[::-1], y=upper95 + lower95[::-1],
         fill="toself", fillcolor="rgba(150,150,150,0.12)",
         line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="95% CI",
     ))
     fig.add_trace(go.Scatter(
-        x=dates + dates[::-1],
-        y=upper80 + lower80[::-1],
+        x=dates + dates[::-1], y=upper80 + lower80[::-1],
         fill="toself", fillcolor="rgba(120,120,120,0.22)",
         line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="80% CI",
     ))
@@ -459,9 +642,10 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
             zeroline=True,
             zerolinecolor="rgba(100,100,100,0.45)",
             zerolinewidth=1,
-            tickfont=dict(size=11),
+            tickfont=dict(size=11, family="Inter, sans-serif"),
         ),
-        xaxis=dict(showgrid=False),
+        xaxis=dict(showgrid=False, tickfont=dict(size=11, family="Inter, sans-serif")),
+        font=dict(family="Inter, sans-serif"),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -477,31 +661,29 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
 # 5. 공통 섹션 렌더러
 # ──────────────────────────────────────────────────────────────────
 
-def render_direction_headline(out_df: pd.DataFrame, value_label: str):
-    pred = float(out_df["예측값"].iloc[-1])
-    date = out_df.index[-1]
-    up   = pred > 0
+def render_direction_headline(pred: float, date: pd.Timestamp,
+                               target_date: pd.Timestamp, value_label: str):
+    """현재 예측 헤드라인 — get_latest_forecast() 결과를 받아 표시."""
+    up = pred > 0
 
-    emoji  = "📈" if up else "📉"
-    label  = "상승" if up else "하락"
-    color  = CLR_TEAL if up else CLR_RED
-    bg     = BG_TEAL  if up else BG_RED
+    emoji    = "📈" if up else "📉"
+    label    = "상승 전망" if up else "하락 전망"
+    card_cls = "up" if up else "dn"
 
-    target_date = date + pd.DateOffset(months=6)
-
-    direction_pill = _pill("▲ 상승 전망" if up else "▼ 하락 전망", bg, color)
-    ai_pill        = _pill("AI 예측", BG_BLUE, "#185FA5")
-
-    st.markdown(
-        f"<div style='text-align:center;padding:1.5rem;border-radius:16px;"
-        f"background:{bg};margin:0.2rem 0 0.4rem 0;'>"
-        f"<div style='font-size:3.4rem;font-weight:500;color:{color};line-height:1.15'>"
-        f"{emoji} {label} 전망</div>"
-        f"<div style='margin-top:10px;display:flex;gap:8px;justify-content:center'>"
-        f"{ai_pill} {direction_pill}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
+    direction_pill = _pill(
+        "▲ 상승 전망" if up else "▼ 하락 전망",
+        BG_TEAL if up else BG_RED,
+        CLR_TEAL if up else CLR_RED,
     )
+    ai_pill = _pill("AI 예측", BG_BLUE, "#185FA5")
+
+    st.markdown(f"""
+<div class="hero-card {card_cls}">
+  <div class="hero-emoji">{emoji}</div>
+  <div class="hero-direction {card_cls}">{label}</div>
+  <div class="hero-badges">{ai_pill} {direction_pill}</div>
+</div>
+""", unsafe_allow_html=True)
     st.caption(
         f"📅 **{date.strftime('%Y년 %m월')}까지의 데이터** 기준 → "
         f"**{target_date.strftime('%Y년 %m월')} 방향** 예측 · "
@@ -523,7 +705,6 @@ def _kpi(label: str, value: str, pill_text: str = None,
 
 
 def _pill_grade(v):
-    """정확도 수치 → (pill_text, bg, fg) 튜플."""
     if v is None:
         return None
     if v >= 80:
@@ -567,7 +748,6 @@ def render_metric_cards(metrics: dict, with_ic: bool = False):
 def _build_feat_map() -> dict:
     m = {}
 
-    # ── WSTS 지역별 파생 피처 (build_features() Section A 완전 열거) ──
     _regions = {
         "Americas": "미주", "Europe": "유럽", "Japan": "일본",
         "Asia_Pacific": "아태지역", "Worldwide": "전세계",
@@ -587,7 +767,6 @@ def _build_feat_map() -> dict:
         m[f"{b}_vs_ma24"]          = f"{ko} 반도체 YoY (24개월 내 상대 위치)"
         m[f"wsts_{r}_YoY"]         = f"{ko} 반도체 매출 YoY"
 
-    # ── 주식 수익률 피처 (Section B) ──
     _tickers = {
         "SOX": "반도체지수 SOX", "NVDA": "NVIDIA", "TSM": "TSMC",
         "ASML": "ASML", "Samsung": "삼성전자", "SKHynix": "SK하이닉스",
@@ -605,7 +784,6 @@ def _build_feat_map() -> dict:
     m["Eq_AvgRet_lag6"]  = "반도체 기업 평균 수익률 (6개월 전)"
     m["Eq_AvgRet_lag12"] = "반도체 기업 평균 수익률 (12개월 전)"
 
-    # ── FRED 거시지표 (Section C) ──
     _fred = {
         "FRED_SemiProd":  "반도체 생산지수 (미국)",
         "FRED_ISM_Mfg":   "ISM 제조업 지수",
@@ -626,21 +804,17 @@ def _build_feat_map() -> dict:
         m[f"{b}_ma6"]           = f"{ko} YoY (6개월 평균)"
         m[f"{b}_momentum_3_12"] = f"{ko} YoY 모멘텀"
         m[f"{b}_accel"]         = f"{ko} YoY 가속도"
-    # T10Y2Y: YoY 변환 없이 원본 사용
     m["FRED_T10Y2Y"]       = "장단기 금리차 (10년-2년)"
     m["FRED_T10Y2Y_lag6"]  = "장단기 금리차 (6개월 전)"
     m["FRED_T10Y2Y_lag12"] = "장단기 금리차 (12개월 전)"
     m["FRED_T10Y2Y_chg3"]  = "장단기 금리차 변화 (3개월)"
 
-    # ── ISM 파생 (Section D) ──
     m["ISM_above50"] = "ISM 50 초과 여부 (제조업 확장)"
     m["ISM_mom3"]    = "ISM 3개월 모멘텀"
 
-    # ── 계절성 (Section E) ──
     m["month_sin"] = "계절성 (사인)"
     m["month_cos"] = "계절성 (코사인)"
 
-    # ── Bear 선행 피처 (Section H) ──
     m["T10Y3M"]              = "장단기 금리차 (10년-3개월)"
     m["T10Y3M_chg3"]         = "금리차 3개월 변화"
     m["T10Y3M_chg6"]         = "금리차 6개월 변화"
@@ -659,7 +833,6 @@ def _build_feat_map() -> dict:
     m["FedFunds_lag6"]       = "연방기금금리 (6개월 전)"
     m["FedFunds_lag12"]      = "연방기금금리 (12개월 전)"
 
-    # ── Bridge (Stage 1 → Stage 2) ──
     m["v2_pred_ww_yoy"] = "AI 반도체 경기 예측 (1단계 출력)"
 
     return m
@@ -684,6 +857,7 @@ def render_shap_section(cfg: dict):
             y=labels,
             orientation="h",
             marker_color=CLR_BLUE,
+            marker_line_width=0,
         ))
         fig.update_layout(
             height=400,
@@ -694,27 +868,27 @@ def render_shap_section(cfg: dict):
                 autorange="reversed",
                 automargin=True,
                 gridcolor="rgba(0,0,0,0)",
-                tickfont=dict(size=12),
+                tickfont=dict(size=12, family="Inter, sans-serif"),
             ),
-            xaxis=dict(gridcolor="rgba(136,135,128,0.15)", title="영향도"),
+            xaxis=dict(
+                gridcolor="rgba(136,135,128,0.15)", title="영향도",
+                tickfont=dict(size=11, family="Inter, sans-serif"),
+            ),
+            font=dict(family="Inter, sans-serif"),
         )
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.warning(f"SHAP 계산을 수행하지 못했습니다: {e}")
 
 
-def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
-                           stage: str, expert_mode: bool):
-    """📊 한 줄 요약 + 🔍 세부 분석 아코디언 + 🎯 신뢰도 바."""
+def render_detail_sections(metrics: dict, is_up: bool, expert_mode: bool):
+    """📊 한 줄 요약 + 🔍 세부 분석 아코디언."""
     dir_acc  = metrics.get("dir_acc", 0)
     dir_bear = metrics.get("dir_bear")
     rmse     = metrics.get("rmse", 0)
     asym     = metrics.get("asym_loss", 0)
     n_ho     = metrics.get("n_holdout", 0)
-    pred_last = float(out_df["예측값"].iloc[-1])
-    is_up     = pred_last > 0
 
-    # ── 📊 한 줄 요약 ──
     st.markdown("#### 📊 한 줄 요약")
     if expert_mode:
         st.markdown(
@@ -734,8 +908,6 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             )
 
     st.markdown("---")
-
-    # ── 🔍 세부 분석 아코디언 ──
     st.markdown("#### 🔍 세부 분석")
 
     with st.expander("📡 모델 성능 분석", expanded=False):
@@ -760,16 +932,6 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             st.markdown(
                 f"모델이 방향을 **{_fmt(dir_acc, pct=True)}** 정확도로 맞혔어요. "
                 f"Bear(하락) 구간 정확도는 **{_fmt_bear(dir_bear)}** 이에요."
-            )
-
-    with st.expander("📈 예측 vs 실제 흐름", expanded=False):
-        if expert_mode:
-            st.markdown("**Hold-out 구간 예측/실제값 (수치)**")
-            st.dataframe(out_df.style.format("{:.2f}"), use_container_width=True)
-        else:
-            st.markdown(
-                "최근 예측과 실제 흐름을 보여줘요. "
-                "초록 선이 실제, 파란 점선이 예측이에요."
             )
 
     with st.expander("⚠️ 리스크 & 주의사항", expanded=False):
@@ -850,9 +1012,21 @@ def render_hit_history(out_df: pd.DataFrame, freq_label: str):
 
 def view_stage1(expert_mode: bool = False):
     cfg = STAGE1
-    st.header("📦 반도체 경기 예측 (6개월 뒤)")
-    st.caption("전 세계 반도체 매출이 1년 전보다 얼마나 늘지 예측해요. SK하이닉스 전망의 출발점이에요.")
+    st.markdown(
+        "<div class='page-title'>📦 반도체 경기 예측 (6개월 뒤)</div>"
+        "<div class='page-sub'>전 세계 반도체 매출이 1년 전보다 얼마나 늘지 예측해요. SK하이닉스 전망의 출발점이에요.</div>",
+        unsafe_allow_html=True,
+    )
 
+    # ── 진짜 현재 예측 (최신 피처 행 → 미래 방향) ──
+    fc = None
+    try:
+        fc = get_latest_forecast(cfg["features_path"], cfg["model_path"])
+        render_direction_headline(fc["pred"], fc["date"], fc["target_date"], cfg["value_label"])
+    except Exception as e:
+        st.error(f"현재 예측을 불러오지 못했습니다: {e}")
+
+    # ── 백테스트 성능 (별도 expander) ──
     try:
         metrics, df = evaluate_stage(
             cfg["features_path"], cfg["model_path"], cfg["target"], cfg["test_eval"]
@@ -861,9 +1035,8 @@ def view_stage1(expert_mode: bool = False):
         st.error(f"Stage 1 평가 중 오류가 발생했습니다: {e}")
         return
 
-    render_direction_headline(df, cfg["value_label"])
-
-    render_detail_sections(metrics, df, "stage1", expert_mode)
+    is_up = fc["pred"] > 0 if fc else True
+    render_detail_sections(metrics, is_up, expert_mode)
 
     with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
         st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
@@ -882,9 +1055,21 @@ def view_stage1(expert_mode: bool = False):
 
 def view_stage2(expert_mode: bool = False):
     cfg = STAGE2
-    st.header("📈 SK하이닉스 주가 전망 (6개월)")
-    st.caption("반도체 경기 예측을 바탕으로 SK하이닉스 주가가 오를지 내릴지 판단해요.")
+    st.markdown(
+        "<div class='page-title'>📈 SK하이닉스 주가 전망 (6개월)</div>"
+        "<div class='page-sub'>반도체 경기 예측을 바탕으로 SK하이닉스 주가가 오를지 내릴지 판단해요.</div>",
+        unsafe_allow_html=True,
+    )
 
+    # ── 진짜 현재 예측 ──
+    fc = None
+    try:
+        fc = get_latest_forecast(cfg["features_path"], cfg["model_path"])
+        render_direction_headline(fc["pred"], fc["date"], fc["target_date"], cfg["value_label"])
+    except Exception as e:
+        st.error(f"현재 예측을 불러오지 못했습니다: {e}")
+
+    # ── 백테스트 성능 ──
     try:
         metrics, df = evaluate_stage(
             cfg["features_path"], cfg["model_path"], cfg["target"],
@@ -894,15 +1079,13 @@ def view_stage2(expert_mode: bool = False):
         st.error(f"Stage 2 평가 중 오류가 발생했습니다: {e}")
         return
 
-    render_direction_headline(df, cfg["value_label"])
-
-    render_detail_sections(metrics, df, "stage2", expert_mode)
+    is_up = fc["pred"] > 0 if fc else True
+    render_detail_sections(metrics, is_up, expert_mode)
 
     with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
         st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
         render_ribbon_chart(df, metrics["rmse"], height=340)
 
-    # ── 2차: 토글로 숨긴 상세 정보 ──
     with st.expander("📊 상세 성능 지표"):
         st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
         render_metric_cards(metrics, with_ic=True)
@@ -918,23 +1101,33 @@ def view_stage2(expert_mode: bool = False):
 
 
 def _flow_box(title: str, subtitle: str, code: str = None):
-    with st.container(border=True):
-        st.markdown(f"### {title}")
-        st.markdown(f"**{subtitle}**")
-        if code:
-            st.caption(f"`{code}`")
+    parts = title.split(' ', 1)
+    icon  = parts[0] if parts else ''
+    step  = parts[1] if len(parts) > 1 else title
+    code_html = f'<div class="fc-code">{code}</div>' if code else ''
+    st.markdown(f"""
+<div class="flow-card">
+  <div class="fc-step">{step}</div>
+  <div class="fc-icon">{icon}</div>
+  <div class="fc-title">{subtitle}</div>
+  {code_html}
+</div>
+""", unsafe_allow_html=True)
 
 
 def _flow_arrow():
     st.markdown(
-        "<div style='text-align:center;font-size:2.6rem;margin-top:1.6rem'>➡️</div>",
+        "<div style='text-align:center;font-size:1.6rem;color:#ccc;margin-top:1.4rem'>→</div>",
         unsafe_allow_html=True,
     )
 
 
 def render_market_signals():
-    st.subheader("📊 현재 시장 분위기")
-    st.caption("코스피·미국 반도체지수는 **실시간** (최대 1시간 자동 갱신) · AI 예측 신호는 학습 검증 기준이에요.")
+    st.markdown(
+        "<div style='font-size:1rem;font-weight:600;margin:4px 0 6px'>📡 현재 시장 분위기</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption("코스피·미국 반도체지수는 **실시간** (최대 1시간 자동 갱신) · AI 예측 신호는 최신 모델 기준이에요.")
 
     mom = get_market_momentum()
     kospi_mom = mom.get("KOSPI")
@@ -942,26 +1135,22 @@ def render_market_signals():
 
     model_up = None
     try:
-        _, out2 = evaluate_stage(
-            STAGE2["features_path"], STAGE2["model_path"],
-            STAGE2["target"], STAGE2["test_eval"], with_ic=True
-        )
-        model_up = bool(out2["예측값"].iloc[-1] > 0)
+        fc2 = get_latest_forecast(STAGE2["features_path"], STAGE2["model_path"])
+        model_up = bool(fc2["pred"] > 0)
     except Exception:
         pass
 
-    def _mom_str(v):
-        return "N/A" if v is None else f"{v:+.1f}%"
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("🇰🇷 코스피 (최근 3개월)", _mom_str(kospi_mom),
-                  delta=None if kospi_mom is None else f"{kospi_mom:+.1f}%")
-        st.caption("실시간 · 최대 1시간 전 데이터")
-    with c2:
-        st.metric("💽 미국 반도체지수 (최근 3개월)", _mom_str(sox_mom),
-                  delta=None if sox_mom is None else f"{sox_mom:+.1f}%")
-        st.caption("실시간 · 최대 1시간 전 데이터")
+    def _val_html(v, is_bool: bool = False) -> str:
+        if is_bool:
+            if v is None:
+                return '<div class="sig-val na">N/A</div>'
+            cls = "up" if v else "dn"
+            txt = "📈 상승" if v else "📉 하락"
+            return f'<div class="sig-val {cls}">{txt}</div>'
+        if v is None:
+            return '<div class="sig-val na">N/A</div>'
+        cls = "up" if v > 0 else "dn"
+        return f'<div class="sig-val {cls}">{v:+.1f}%</div>'
 
     votes = []
     if kospi_mom is not None:
@@ -971,24 +1160,45 @@ def render_market_signals():
     if model_up is not None:
         votes.append(model_up)
 
-    with c3:
-        if not votes:
-            st.metric("🧭 종합 신호", "N/A")
-        else:
-            pos = sum(votes)
-            if pos > len(votes) / 2:
-                st.metric("🧭 종합 신호", "📈 상승 우세",
-                          delta=f"{pos}/{len(votes)} 신호 상승")
-            elif pos < len(votes) / 2:
-                st.metric("🧭 종합 신호", "📉 하락 우세",
-                          delta=f"-{len(votes)-pos}/{len(votes)} 신호 하락")
-            else:
-                st.metric("🧭 종합 신호", "➖ 중립")
-        st.caption("AI 신호는 2025년 10월 모델 기준")
+    pos = sum(votes) if votes else 0
+    n   = len(votes) if votes else 0
+    if not votes:
+        combo_html = '<div class="sig-val na">N/A</div>'
+    elif pos > n / 2:
+        combo_html = '<div class="sig-val up">📈 상승 우세</div>'
+    elif pos < n / 2:
+        combo_html = '<div class="sig-val dn">📉 하락 우세</div>'
+    else:
+        combo_html = '<div class="sig-val neu">➖ 중립</div>'
+
+    st.markdown(f"""
+<div class="sig-grid">
+  <div class="sig-card">
+    <div class="sig-icon">🇰🇷</div>
+    <div class="sig-name">코스피</div>
+    <div class="sig-period">최근 3개월 변화</div>
+    {_val_html(kospi_mom)}
+    <div class="sig-sub">실시간 · 최대 1시간 전 데이터</div>
+  </div>
+  <div class="sig-card">
+    <div class="sig-icon">💽</div>
+    <div class="sig-name">미국 반도체지수 (SOX)</div>
+    <div class="sig-period">최근 3개월 변화</div>
+    {_val_html(sox_mom)}
+    <div class="sig-sub">실시간 · 최대 1시간 전 데이터</div>
+  </div>
+  <div class="sig-card">
+    <div class="sig-icon">🧭</div>
+    <div class="sig-name">종합 신호</div>
+    <div class="sig-period">코스피 + SOX + AI 예측</div>
+    {combo_html}
+    <div class="sig-sub">AI 신호는 최신 모델 기준</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     st.caption(
-        "※ 종합 신호 = 코스피·미국 반도체지수의 3개월 흐름 + AI 최신 예측을 합친 다수결이에요. "
-        "주가지수는 실시간(최대 1시간 단위 갱신), AI 신호는 최신 예측 기준이에요."
+        "※ 종합 신호 = 코스피·미국 반도체지수의 3개월 흐름 + AI 최신 예측을 합친 다수결이에요."
     )
 
 
@@ -999,66 +1209,94 @@ def _plain_acc(dir_acc) -> str:
 
 def view_home(expert_mode: bool = False):
     """🏠 한눈에 보기 — 결론 · 시장 분위기 · 신뢰도를 한 페이지로."""
+    # ── 진짜 현재 예측 (최신 피처 행 기반) ──
+    fc2 = None
     try:
-        m2, df2 = evaluate_stage(
-            STAGE2["features_path"], STAGE2["model_path"],
-            STAGE2["target"], STAGE2["test_eval"], with_ic=True,
-        )
+        fc2 = get_latest_forecast(STAGE2["features_path"], STAGE2["model_path"])
     except Exception as e:
         st.error(f"예측 결과를 불러오지 못했습니다: {e}")
         return
 
-    up = float(df2["예측값"].iloc[-1]) > 0
+    up = fc2["pred"] > 0
 
-    # ── 결론 (가장 중요) ──
     st.markdown("### 🔮 앞으로 6개월, SK하이닉스 주가는 오를까요?")
-    render_direction_headline(df2, STAGE2["value_label"])
+    render_direction_headline(fc2["pred"], fc2["date"], fc2["target_date"], STAGE2["value_label"])
 
-    takeaway = ("AI는 향후 6개월 SK하이닉스 주가가 **오를 가능성**이 높다고 봐요."
-                if up else
-                "AI는 향후 6개월 SK하이닉스 주가가 **내릴 가능성**이 높다고 봐요.")
-    st.info(f"{takeaway}  \n{_plain_acc(m2['dir_acc'])}")
+    # 백테스트 정확도 참고용으로만 가져옴
+    m2_metrics = None
+    try:
+        m2_metrics, _ = evaluate_stage(
+            STAGE2["features_path"], STAGE2["model_path"],
+            STAGE2["target"], STAGE2["test_eval"], with_ic=True,
+        )
+    except Exception:
+        pass
 
-    # ── 예측 과정 (쉬운 3단계) ──
+    dir_acc = m2_metrics.get("dir_acc") if m2_metrics else None
+    takeaway = (
+        "AI는 향후 6개월 SK하이닉스 주가가 <b>오를 가능성</b>이 높다고 봐요."
+        if up else
+        "AI는 향후 6개월 SK하이닉스 주가가 <b>내릴 가능성</b>이 높다고 봐요."
+    )
+    acc_str = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', _plain_acc(dir_acc)) if dir_acc else ""
+    st.markdown(
+        f'<div class="info-box">{takeaway}<br>{acc_str}</div>',
+        unsafe_allow_html=True,
+    )
+
     st.markdown("#### 🧭 이렇게 예측해요")
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        with st.container(border=True):
-            st.markdown("##### 🌐 1. 반도체 경기")
-            st.caption("전 세계 반도체가 6개월 뒤 얼마나 팔릴지 예측해요.")
-    with s2:
-        with st.container(border=True):
-            st.markdown("##### 🔗 2. 신호 연결")
-            st.caption("반도체 경기 예측을 SK하이닉스 분석에 연결해요.")
-    with s3:
-        with st.container(border=True):
-            st.markdown("##### 📈 3. 주가 전망")
-            st.caption("SK하이닉스 주가가 오를지 내릴지 최종 판단해요.")
+    st.markdown("""
+<div class="step-flow">
+  <div class="step-card">
+    <div class="step-num">1</div>
+    <div class="step-icon">🌐</div>
+    <div class="step-title">반도체 경기</div>
+    <div class="step-desc">전 세계 반도체가 6개월 뒤 얼마나 팔릴지 예측해요.</div>
+  </div>
+  <div class="step-arrow">›</div>
+  <div class="step-card">
+    <div class="step-num">2</div>
+    <div class="step-icon">🔗</div>
+    <div class="step-title">신호 연결</div>
+    <div class="step-desc">반도체 경기 예측을 SK하이닉스 분석에 연결해요.</div>
+  </div>
+  <div class="step-arrow">›</div>
+  <div class="step-card">
+    <div class="step-num">3</div>
+    <div class="step-icon">📈</div>
+    <div class="step-title">주가 전망</div>
+    <div class="step-desc">SK하이닉스 주가가 오를지 내릴지 최종 판단해요.</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     st.divider()
     render_market_signals()
 
     st.divider()
     with st.expander("🎯 이 예측, 얼마나 믿을 수 있나요?"):
-        dir_acc  = m2.get("dir_acc", 0)
-        dir_bear = m2.get("dir_bear")
-        st.markdown(_plain_acc(dir_acc))
-        conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
-        _confidence_bar(dir_acc, "전체 방향 정확도", conf_color)
-        if dir_bear is not None:
-            bear_color = (CLR_TEAL if dir_bear >= 60
-                          else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
-            st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-            _confidence_bar(dir_bear, "하락장에서의 정확도", bear_color)
-        st.caption("‘검증’은 모델이 학습에 쓰지 않은 최근 데이터로 시험 본 결과예요. "
+        if m2_metrics is not None and dir_acc is not None:
+            dir_bear = m2_metrics.get("dir_bear")
+            st.markdown(_plain_acc(dir_acc))
+            conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
+            _confidence_bar(dir_acc, "전체 방향 정확도", conf_color)
+            if dir_bear is not None:
+                bear_color = (CLR_TEAL if dir_bear >= 60
+                              else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
+                st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+                _confidence_bar(dir_bear, "하락장에서의 정확도", bear_color)
+        st.caption("'검증'은 모델이 학습에 쓰지 않은 최근 데이터로 시험 본 결과예요. "
                    "참고용이며 투자 권유가 아니에요.")
 
     st.caption("👈 왼쪽 메뉴에서 단계별 상세 분석과 차트를 볼 수 있어요.")
 
 
 def view_e2e(expert_mode: bool = False):
-    st.header("🔗 예측은 어떻게 작동하나요?")
-    st.caption("반도체 경기 예측이 SK하이닉스 주가 전망으로 이어지는 전체 과정을 보여줘요.")
+    st.markdown(
+        "<div class='page-title'>🔗 예측은 어떻게 작동하나요?</div>"
+        "<div class='page-sub'>반도체 경기 예측이 SK하이닉스 주가 전망으로 이어지는 전체 과정을 보여줘요.</div>",
+        unsafe_allow_html=True,
+    )
 
     f1, fa, f2, fb, f3 = st.columns([4, 1, 4, 1, 4])
     with f1:
@@ -1076,11 +1314,8 @@ def view_e2e(expert_mode: bool = False):
                   "skh_xgb_final.pkl" if expert_mode else None)
 
     st.divider()
-
-    # ── 1차 노출: 현재 시장 신호 ──
     render_market_signals()
 
-    # ── 2차: 토글로 숨긴 기술 상세 ──
     with st.expander("① Stage 1 출력 시계열"):
         st.caption(f"lookahead 없이 재학습한 6개월 선행 반도체 매출 YoY 예측값(`{BRIDGE_COL}`)")
         try:
@@ -1098,6 +1333,7 @@ def view_e2e(expert_mode: bool = False):
                     showlegend=False, margin=dict(l=0, r=0, t=8, b=0),
                     yaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
                     xaxis=dict(showgrid=False),
+                    font=dict(family="Inter, sans-serif"),
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -1183,9 +1419,9 @@ def main():
     st.sidebar.divider()
     now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     st.sidebar.markdown(
-        f"<div style='font-size:11px;color:#999;line-height:1.8'>"
+        f"<div class='sidebar-footer'>"
         f"📡 <b>코스피·SOX</b>: 실시간 (1시간 갱신)<br>"
-        f"🤖 <b>AI 예측 기준</b>: 2025년 10월<br>"
+        f"🤖 <b>AI 예측 기준</b>: 최신 모델 피처 기준<br>"
         f"🕐 <b>페이지 로드</b>: {now_kst}"
         f"</div>",
         unsafe_allow_html=True,
@@ -1194,7 +1430,11 @@ def main():
     if expert_mode:
         _expert_banner()
 
-    st.title("반도체 사이클 기반 SK하이닉스 수익률 예측")
+    st.markdown(
+        "<div class='page-title'>반도체 사이클 기반 SK하이닉스 수익률 예측</div>"
+        "<div class='page-sub'>전 세계 반도체 경기를 분석해 SK하이닉스 6개월 주가 방향을 예측해요</div>",
+        unsafe_allow_html=True,
+    )
 
     if view.startswith("🏠"):
         view_home(expert_mode)
