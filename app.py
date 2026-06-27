@@ -637,17 +637,14 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요. 🙏"
             )
 
-    st.markdown("---")
-
-    # ── 🎯 신뢰도 바 ──
-    st.markdown("#### 🎯 모델 신뢰도")
-    conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
-    _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
-    if dir_bear is not None:
-        bear_color = (CLR_TEAL if dir_bear >= 60
-                      else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
-        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-        _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
+    with st.expander("🎯 모델 신뢰도"):
+        conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
+        _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
+        if dir_bear is not None:
+            bear_color = (CLR_TEAL if dir_bear >= 60
+                          else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
+            st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+            _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
 
 
 def render_confusion(df: pd.DataFrame):
@@ -699,11 +696,7 @@ def render_hit_history(out_df: pd.DataFrame, freq_label: str):
 
 def view_stage1(expert_mode: bool = False):
     cfg = STAGE1
-    st.header("📦 Stage 1 — 반도체 출하량(WW 매출) YoY 예측")
-    st.caption(
-        "전 세계 반도체 매출의 6개월 선행 전년동월대비(YoY) 증감률을 XGBoost로 예측합니다. "
-        "Bear(하락) 구간 오예측에 더 큰 페널티를 주도록 학습되었습니다."
-    )
+    st.header("📦 Stage 1 — 반도체 출하량 YoY 예측")
 
     try:
         metrics, df = evaluate_stage(
@@ -713,30 +706,27 @@ def view_stage1(expert_mode: bool = False):
         st.error(f"Stage 1 평가 중 오류가 발생했습니다: {e}")
         return
 
+    # ── 1차 노출: 방향 예측 + 차트만 ──
     render_direction_headline(df, cfg["value_label"])
-
-    st.subheader("모델 성능 지표 (Hold-out)")
-    st.caption(f"평가 구간: {metrics['period']}  ·  선택 피처 {metrics['n_features']}개")
-    render_metric_cards(metrics)
-
-    st.subheader("예측 vs 실제 — Hold-out 타임라인")
     render_ribbon_chart(df, metrics["rmse"])
 
     render_detail_sections(metrics, df, "stage1", expert_mode)
 
-    st.divider()
-    st.subheader("✨ 알파 — 모델 해석 & 적중 히스토리")
-    render_shap_section(cfg)
-    render_hit_history(df, cfg["freq_label"])
+    # ── 2차: 토글로 숨긴 상세 정보 ──
+    with st.expander("📊 상세 성능 지표"):
+        st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
+        render_metric_cards(metrics)
+
+    with st.expander("🔬 SHAP 피처 중요도"):
+        render_shap_section(cfg)
+
+    with st.expander("🎯 적중 히스토리"):
+        render_hit_history(df, cfg["freq_label"])
 
 
 def view_stage2(expert_mode: bool = False):
     cfg = STAGE2
-    st.header("📈 Stage 2 — SK하이닉스 6개월 수익률 방향 예측")
-    st.caption(
-        "Stage 1의 반도체 사이클 예측을 입력 피처로 활용해 "
-        "SK하이닉스 6개월 종가 수익률(방향)을 예측합니다."
-    )
+    st.header("📈 Stage 2 — SK하이닉스 6개월 수익률 예측")
 
     try:
         metrics, df = evaluate_stage(
@@ -747,26 +737,25 @@ def view_stage2(expert_mode: bool = False):
         st.error(f"Stage 2 평가 중 오류가 발생했습니다: {e}")
         return
 
+    # ── 1차 노출: 방향 예측 + 차트만 ──
     render_direction_headline(df, cfg["value_label"])
-
-    st.subheader("모델 성능 지표 (Hold-out)")
-    st.caption(f"평가 구간: {metrics['period']}  ·  사용 피처 {metrics['n_features']}개")
-    render_metric_cards(metrics, with_ic=True)
-
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        st.subheader("예측 vs 실제 수익률 — Hold-out")
-        render_ribbon_chart(df, metrics["rmse"], height=360)
-    with col_b:
-        st.subheader("방향 예측 혼동행렬")
-        render_confusion(df)
+    render_ribbon_chart(df, metrics["rmse"], height=360)
 
     render_detail_sections(metrics, df, "stage2", expert_mode)
 
-    st.divider()
-    st.subheader("✨ 알파 — 모델 해석 & 적중 히스토리")
-    render_shap_section(cfg)
-    render_hit_history(df, cfg["freq_label"])
+    # ── 2차: 토글로 숨긴 상세 정보 ──
+    with st.expander("📊 상세 성능 지표"):
+        st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
+        render_metric_cards(metrics, with_ic=True)
+
+    with st.expander("🔀 방향 예측 혼동행렬"):
+        render_confusion(df)
+
+    with st.expander("🔬 SHAP 피처 중요도"):
+        render_shap_section(cfg)
+
+    with st.expander("🎯 적중 히스토리"):
+        render_hit_history(df, cfg["freq_label"])
 
 
 def _flow_box(title: str, subtitle: str, code: str):
@@ -861,80 +850,68 @@ def view_e2e():
 
     st.divider()
 
-    st.subheader("① Stage 1 출력 — Expanding Window 예측 시계열")
-    st.caption(
-        f"각 관찰일 시점에서 lookahead 없이 재학습해 생성한 6개월 선행 "
-        f"반도체 매출 YoY 예측값(`{BRIDGE_COL}`)입니다."
-    )
-    try:
-        s1pred = load_csv(STAGE1_PRED_PATH)
-        if BRIDGE_COL in s1pred.columns:
-            s1_data = s1pred[[BRIDGE_COL]].dropna()
-            fig = go.Figure(go.Scatter(
-                x=s1_data.index, y=s1_data[BRIDGE_COL],
-                line=dict(color=CLR_BLUE, width=2),
-                mode="lines+markers", marker=dict(size=4),
-            ))
-            fig.update_layout(
-                height=300,
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
-                margin=dict(l=0, r=0, t=8, b=0),
-                yaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
-                xaxis=dict(showgrid=False),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning(f"`{BRIDGE_COL}` 컬럼을 찾을 수 없습니다.")
-            st.dataframe(s1pred.head(), use_container_width=True)
-    except Exception as e:
-        st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
-
-    st.divider()
-
-    st.subheader("② Stage 2 입력 — Bridge 피처 결합 확인")
-    try:
-        s2feat = load_csv(STAGE2["features_path"])
-        if BRIDGE_COL in s2feat.columns:
-            st.success(
-                f"✅ Stage 2 피처셋에 Stage 1 예측 피처 `{BRIDGE_COL}`가 포함되어 있습니다. "
-                "두 단계가 정상적으로 연결되었습니다."
-            )
-            n_total  = s2feat.shape[1]
-            n_bridge = sum(1 for c in s2feat.columns if c.startswith("v2_pred"))
-            m1, m2 = st.columns(2)
-            m1.metric("Stage 2 전체 피처 수", f"{n_total}개")
-            m2.metric("Stage 1 유래 Bridge 피처", f"{n_bridge}개")
-        else:
-            st.warning(f"Stage 2 피처셋에서 `{BRIDGE_COL}`를 찾지 못했습니다.")
-    except Exception as e:
-        st.error(f"Stage 2 피처 데이터 로드 실패: {e}")
-
-    st.divider()
-
-    st.subheader("③ 두 단계 성능 요약")
-    rows = []
-    for cfg, with_ic in [(STAGE1, False), (STAGE2, True)]:
-        try:
-            m, _ = evaluate_stage(
-                cfg["features_path"], cfg["model_path"], cfg["target"],
-                cfg["test_eval"], with_ic=with_ic
-            )
-            rows.append({
-                "단계": f"{cfg['name']} · {cfg['title']}",
-                "방향정확도(전체)": _fmt(m["dir_acc"], pct=True),
-                "방향정확도(Bear)": _fmt(m["dir_bear"], pct=True),
-                "RMSE": _fmt(m["rmse"]),
-                "Asym Loss": _fmt(m["asym_loss"]),
-                "IC": _fmt(m.get("ic")) if with_ic else "—",
-            })
-        except Exception as e:
-            rows.append({"단계": cfg["name"], "방향정확도(전체)": f"오류: {e}"})
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    st.divider()
+    # ── 1차 노출: 현재 시장 신호 ──
     render_market_signals()
+
+    # ── 2차: 토글로 숨긴 기술 상세 ──
+    with st.expander("① Stage 1 출력 시계열"):
+        st.caption(f"lookahead 없이 재학습한 6개월 선행 반도체 매출 YoY 예측값(`{BRIDGE_COL}`)")
+        try:
+            s1pred = load_csv(STAGE1_PRED_PATH)
+            if BRIDGE_COL in s1pred.columns:
+                s1_data = s1pred[[BRIDGE_COL]].dropna()
+                fig = go.Figure(go.Scatter(
+                    x=s1_data.index, y=s1_data[BRIDGE_COL],
+                    line=dict(color=CLR_BLUE, width=2),
+                    mode="lines+markers", marker=dict(size=4),
+                ))
+                fig.update_layout(
+                    height=280,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False, margin=dict(l=0, r=0, t=8, b=0),
+                    yaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
+                    xaxis=dict(showgrid=False),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning(f"`{BRIDGE_COL}` 컬럼을 찾을 수 없습니다.")
+        except Exception as e:
+            st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
+
+    with st.expander("② Bridge 피처 결합 확인"):
+        try:
+            s2feat = load_csv(STAGE2["features_path"])
+            if BRIDGE_COL in s2feat.columns:
+                st.success(f"Stage 2 피처셋에 `{BRIDGE_COL}` 포함 — 두 단계 정상 연결")
+                n_total  = s2feat.shape[1]
+                n_bridge = sum(1 for c in s2feat.columns if c.startswith("v2_pred"))
+                m1, m2 = st.columns(2)
+                m1.metric("전체 피처 수", f"{n_total}개")
+                m2.metric("Bridge 피처", f"{n_bridge}개")
+            else:
+                st.warning(f"Stage 2 피처셋에서 `{BRIDGE_COL}`를 찾지 못했습니다.")
+        except Exception as e:
+            st.error(f"Stage 2 피처 데이터 로드 실패: {e}")
+
+    with st.expander("③ 두 단계 성능 요약"):
+        rows = []
+        for cfg, with_ic in [(STAGE1, False), (STAGE2, True)]:
+            try:
+                m, _ = evaluate_stage(
+                    cfg["features_path"], cfg["model_path"], cfg["target"],
+                    cfg["test_eval"], with_ic=with_ic
+                )
+                rows.append({
+                    "단계": f"{cfg['name']} · {cfg['title']}",
+                    "방향정확도(전체)": _fmt(m["dir_acc"], pct=True),
+                    "방향정확도(Bear)": _fmt(m["dir_bear"], pct=True),
+                    "RMSE": _fmt(m["rmse"]),
+                    "Asym Loss": _fmt(m["asym_loss"]),
+                    "IC": _fmt(m.get("ic")) if with_ic else "—",
+                })
+            except Exception as e:
+                rows.append({"단계": cfg["name"], "방향정확도(전체)": f"오류: {e}"})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ──────────────────────────────────────────────────────────────────
