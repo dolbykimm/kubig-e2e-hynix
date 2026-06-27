@@ -789,18 +789,19 @@ def view_stage1(expert_mode: bool = False):
         st.error(f"Stage 1 평가 중 오류가 발생했습니다: {e}")
         return
 
-    # ── 1차 노출: 방향 예측 + 차트만 ──
     render_direction_headline(df, cfg["value_label"])
-    render_ribbon_chart(df, metrics["rmse"])
 
     render_detail_sections(metrics, df, "stage1", expert_mode)
 
-    # ── 2차: 토글로 숨긴 상세 정보 ──
+    with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
+        st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
+        render_ribbon_chart(df, metrics["rmse"])
+
     with st.expander("📊 상세 성능 지표"):
         st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
         render_metric_cards(metrics)
 
-    with st.expander("🔬 SHAP 피처 중요도"):
+    with st.expander("🔬 예측에 영향을 준 주요 지표"):
         render_shap_section(cfg)
 
     with st.expander("🎯 적중 히스토리"):
@@ -821,11 +822,13 @@ def view_stage2(expert_mode: bool = False):
         st.error(f"Stage 2 평가 중 오류가 발생했습니다: {e}")
         return
 
-    # ── 1차 노출: 방향 예측 + 차트만 ──
     render_direction_headline(df, cfg["value_label"])
-    render_ribbon_chart(df, metrics["rmse"], height=360)
 
     render_detail_sections(metrics, df, "stage2", expert_mode)
+
+    with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
+        st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
+        render_ribbon_chart(df, metrics["rmse"], height=340)
 
     # ── 2차: 토글로 숨긴 상세 정보 ──
     with st.expander("📊 상세 성능 지표"):
