@@ -396,7 +396,22 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
     upper80 = [p + 1.28 * sigma for p in pred]
     lower80 = [p - 1.28 * sigma for p in pred]
 
+    all_vals = actual + pred + upper95 + lower95
+    y_min = min(all_vals)
+    y_max = max(all_vals)
+    pad   = (y_max - y_min) * 0.08
+    y_lo  = y_min - pad
+    y_hi  = y_max + pad
+
     fig = go.Figure()
+
+    # ── 상승/하락 영역 배경 shading ──
+    fig.add_shape(type="rect", xref="paper", yref="y",
+        x0=0, x1=1, y0=0, y1=y_hi,
+        fillcolor="rgba(29,158,117,0.04)", line_width=0, layer="below")
+    fig.add_shape(type="rect", xref="paper", yref="y",
+        x0=0, x1=1, y0=y_lo, y1=0,
+        fillcolor="rgba(226,75,74,0.04)", line_width=0, layer="below")
 
     fig.add_trace(go.Scatter(
         x=dates + dates[::-1],
@@ -428,12 +443,20 @@ def render_ribbon_chart(out_df: pd.DataFrame, rmse: float, height: int = 380):
         paper_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
         margin=dict(l=0, r=0, t=8, b=0),
-        yaxis=dict(gridcolor="rgba(136,135,128,0.15)", zeroline=False),
+        yaxis=dict(
+            range=[y_lo, y_hi],
+            gridcolor="rgba(136,135,128,0.12)",
+            zeroline=True,
+            zerolinecolor="rgba(100,100,100,0.45)",
+            zerolinewidth=1,
+            tickfont=dict(size=11),
+        ),
         xaxis=dict(showgrid=False),
     )
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown(_chart_legend(
+        ("실제값", "#d4f5e7", "#0a6e48"),
         ("예측 중앙값", BG_BLUE, "#185FA5"),
         ("80% 신뢰구간", BG_GREEN, "#3B6D11"),
         ("95% 신뢰구간", BG_TEAL, "#085041"),
@@ -571,12 +594,12 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
         if is_up:
             st.markdown(
                 "반도체 사이클 지표가 상승 구간을 가리키고 있어요 📈 "
-                "HBM 수요가 시그널을 이끌고 있어요."
+                "**→ HBM 수요**가 시그널을 이끌고 있어요."
             )
         else:
             st.markdown(
                 "현재 사이클 지표는 하락 구간을 시사하고 있어요 📉 "
-                "재고 조정 국면에 주의가 필요해요."
+                "**→ 재고 조정 국면** 에 주의가 필요해요."
             )
 
     st.markdown("---")
@@ -776,8 +799,8 @@ def _flow_arrow():
 
 
 def render_market_signals():
-    st.subheader("📊 오늘의 시장 분위기")
-    st.caption("실시간 주식시장 흐름과 AI 예측을 합친 현재 종합 신호예요.")
+    st.subheader("📊 현재 시장 분위기")
+    st.caption("코스피·미국 반도체지수는 **실시간** (최대 1시간 자동 갱신) · AI 예측 신호는 학습 검증 기준이에요.")
 
     mom = get_market_momentum()
     kospi_mom = mom.get("KOSPI")
