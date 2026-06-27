@@ -294,6 +294,12 @@ def _fmt(v, pct=False):
     return f"{v:.1f}%" if pct else f"{v:.3f}"
 
 
+def _fmt_bear(v):
+    if v is None:
+        return "해당 기간 하락 구간 없음"
+    return f"{v:.1f}%"
+
+
 def _pill(text: str, bg: str, fg: str) -> str:
     return (
         f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:500;"
@@ -538,7 +544,7 @@ def render_metric_cards(metrics: dict, with_ic: bool = False):
              p[0] if p else None, p[1] if p else BG_BLUE, p[2] if p else "#185FA5")
     with c3:
         p = _pill_grade(metrics.get("dir_bear"))
-        _kpi("방향 정확도 (Bear)", _fmt(metrics.get("dir_bear"), pct=True),
+        _kpi("방향 정확도 (Bear)", _fmt_bear(metrics.get("dir_bear")),
              p[0] if p else None, p[1] if p else BG_BLUE, p[2] if p else "#185FA5")
     with c4:
         _kpi("RMSE (전체)", _fmt(metrics["rmse"]), "오차 지표", BG_BLUE, "#185FA5")
@@ -665,7 +671,7 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             st.markdown(
                 f"**Hold-out 평가 결과** (`{metrics.get('period', '')}`)\n\n"
                 f"- 방향 정확도(전체): **{_fmt(dir_acc, pct=True)}**\n"
-                f"- 방향 정확도(Bear): **{_fmt(dir_bear, pct=True)}** ← 핵심 지표\n"
+                f"- 방향 정확도(Bear): **{_fmt_bear(dir_bear)}** ← 핵심 지표\n"
                 f"- RMSE: **{rmse:.3f}** · AsymLoss: **{asym:.3f}**\n"
                 f"- 평가 샘플 수: {n_ho}개"
             )
@@ -673,7 +679,7 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             _signal_rows([
                 ("방향 정확도 (전체)", _fmt(dir_acc, pct=True),
                  "up" if dir_acc >= 70 else "dn"),
-                ("방향 정확도 (Bear)", _fmt(dir_bear, pct=True),
+                ("방향 정확도 (Bear)", _fmt_bear(dir_bear),
                  "up" if bear_dir >= 60 else ("neu" if bear_dir >= 40 else "dn")),
                 ("RMSE", f"{rmse:.3f}", "neu"),
                 ("AsymLoss", f"{asym:.3f}", "neu"),
@@ -681,7 +687,7 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
         else:
             st.markdown(
                 f"모델이 방향을 **{_fmt(dir_acc, pct=True)}** 정확도로 맞혔어요. "
-                f"Bear(하락) 구간 정확도는 **{_fmt(dir_bear, pct=True)}** 이에요."
+                f"Bear(하락) 구간 정확도는 **{_fmt_bear(dir_bear)}** 이에요."
             )
 
     with st.expander("📈 예측 vs 실제 흐름", expanded=False):
@@ -698,7 +704,7 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
         if expert_mode:
             bear_dir = dir_bear or 0
             _signal_rows([
-                ("Bear DirAcc 안정성", _fmt(dir_bear, pct=True),
+                ("Bear DirAcc 안정성", _fmt_bear(dir_bear),
                  "dn" if bear_dir < 60 else "up"),
                 ("RMSE 대비 예측 신뢰", f"{rmse:.2f}", "neu"),
             ])
@@ -1050,7 +1056,7 @@ def view_e2e(expert_mode: bool = False):
                 rows.append({
                     "단계": f"{cfg['name']} · {cfg['title']}",
                     "방향정확도(전체)": _fmt(m["dir_acc"], pct=True),
-                    "방향정확도(Bear)": _fmt(m["dir_bear"], pct=True),
+                    "방향정확도(Bear)": _fmt_bear(m.get("dir_bear")),
                     "RMSE": _fmt(m["rmse"]),
                     "Asym Loss": _fmt(m["asym_loss"]),
                     "IC": _fmt(m.get("ic")) if with_ic else "—",
