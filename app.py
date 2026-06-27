@@ -564,142 +564,113 @@ def render_metric_cards(metrics: dict, with_ic: bool = False):
             _kpi("Hold-out 구간", f"{metrics['n_holdout']}개")
 
 
-_FEAT_EXACT = {
-    # FRED 경제지표
-    "FRED_SemiProd":         "반도체 생산지수 (미국)",
-    "FRED_ISM_Mfg":          "ISM 제조업 지수",
-    "FRED_T10Y2Y":           "장단기 금리차 (10년-2년)",
-    "FRED_IndProd":          "산업생산지수 (미국)",
-    "FRED_PCE_Core":         "근원 PCE 물가",
-    "FRED_MfgEmp":           "제조업 고용",
-    "FRED_ConsSenti":        "소비자 심리지수",
-    "FRED_NewOrder":         "제조업 신규 주문",
-    # 주식 수익률
-    "Ret_SOX":               "미국 반도체지수 (SOX)",
-    "Ret_NVDA":              "NVIDIA 수익률",
-    "Ret_TSM":               "TSMC 수익률",
-    "Ret_ASML":              "ASML 수익률",
-    "Ret_Samsung":           "삼성전자 수익률",
-    "Ret_SKHynix":           "SK하이닉스 수익률",
-    # WSTS 집계
-    "wsts_Worldwide_YoY":    "전세계 반도체 매출 YoY",
-    "wsts_Asia_Pacific_YoY": "아태지역 반도체 매출 YoY",
-    # Bridge
-    "v2_pred_ww_yoy":        "AI 반도체 경기 예측",
-}
+def _build_feat_map() -> dict:
+    m = {}
 
-_REGION_KO = {
-    "worldwide":    "전세계",
-    "americas":     "미주",
-    "europe":       "유럽",
-    "japan":        "일본",
-    "asia_pacific": "아태지역",
-}
+    # ── WSTS 지역별 파생 피처 (build_features() Section A 완전 열거) ──
+    _regions = {
+        "Americas": "미주", "Europe": "유럽", "Japan": "일본",
+        "Asia_Pacific": "아태지역", "Worldwide": "전세계",
+    }
+    for r, ko in _regions.items():
+        b = f"{r}_YoY"
+        m[b]                       = f"{ko} 반도체 YoY"
+        m[f"{b}_lag6"]             = f"{ko} 반도체 YoY (6개월 전)"
+        m[f"{b}_lag12"]            = f"{ko} 반도체 YoY (12개월 전)"
+        m[f"{b}_ma3"]              = f"{ko} 반도체 YoY (3개월 평균)"
+        m[f"{b}_ma6"]              = f"{ko} 반도체 YoY (6개월 평균)"
+        m[f"{b}_ma12"]             = f"{ko} 반도체 YoY (12개월 평균)"
+        m[f"{b}_vol3"]             = f"{ko} 반도체 YoY (3개월 변동성)"
+        m[f"{b}_vol6"]             = f"{ko} 반도체 YoY (6개월 변동성)"
+        m[f"{b}_momentum_3_12"]    = f"{ko} 반도체 YoY 모멘텀"
+        m[f"{b}_accel"]            = f"{ko} 반도체 YoY 가속도"
+        m[f"{b}_vs_ma24"]          = f"{ko} 반도체 YoY (24개월 내 상대 위치)"
+        m[f"wsts_{r}_YoY"]         = f"{ko} 반도체 매출 YoY"
 
-_FRED_KO = {
-    "semiprod":   "반도체 생산지수",
-    "ism_mfg":    "ISM 제조업 지수",
-    "t10y2y":     "장단기 금리차",
-    "indprod":    "산업생산지수",
-    "pce_core":   "근원 PCE",
-    "mfgemp":     "제조업 고용",
-    "conssenti":  "소비자 심리",
-    "neworder":   "신규 주문",
-}
+    # ── 주식 수익률 피처 (Section B) ──
+    _tickers = {
+        "SOX": "반도체지수 SOX", "NVDA": "NVIDIA", "TSM": "TSMC",
+        "ASML": "ASML", "Samsung": "삼성전자", "SKHynix": "SK하이닉스",
+    }
+    for t, ko in _tickers.items():
+        b = f"Ret_{t}"
+        m[b]            = f"{ko} 수익률"
+        m[f"{b}_lag6"]  = f"{ko} 수익률 (6개월 전)"
+        m[f"{b}_lag12"] = f"{ko} 수익률 (12개월 전)"
+        m[f"{b}_ma3"]   = f"{ko} 수익률 (3개월 평균)"
+        m[f"{b}_ma6"]   = f"{ko} 수익률 (6개월 평균)"
+        m[f"{b}_vol3"]  = f"{ko} 수익률 (3개월 변동성)"
+        m[f"{b}_vol6"]  = f"{ko} 수익률 (6개월 변동성)"
+    m["Eq_AvgRet"]       = "반도체 기업 평균 수익률"
+    m["Eq_AvgRet_lag6"]  = "반도체 기업 평균 수익률 (6개월 전)"
+    m["Eq_AvgRet_lag12"] = "반도체 기업 평균 수익률 (12개월 전)"
 
-_TICKER_KO = {
-    "sox":      "SOX (반도체지수)",
-    "nvda":     "NVIDIA",
-    "tsm":      "TSMC",
-    "asml":     "ASML",
-    "samsung":  "삼성전자",
-    "skhynix":  "SK하이닉스",
-}
+    # ── FRED 거시지표 (Section C) ──
+    _fred = {
+        "FRED_SemiProd":  "반도체 생산지수 (미국)",
+        "FRED_ISM_Mfg":   "ISM 제조업 지수",
+        "FRED_IndProd":   "산업생산지수 (미국)",
+        "FRED_PCE_Core":  "근원 PCE 물가",
+        "FRED_MfgEmp":    "제조업 고용",
+        "FRED_ConsSenti": "소비자 심리지수",
+        "FRED_NewOrder":  "제조업 신규 주문",
+        "FRED_InvSales":  "재고/매출 비율",
+        "FRED_FedFunds":  "연방기금금리",
+    }
+    for key, ko in _fred.items():
+        b = f"{key}_YoY"
+        m[b]                    = f"{ko} YoY"
+        m[f"{b}_lag6"]          = f"{ko} YoY (6개월 전)"
+        m[f"{b}_lag12"]         = f"{ko} YoY (12개월 전)"
+        m[f"{b}_ma3"]           = f"{ko} YoY (3개월 평균)"
+        m[f"{b}_ma6"]           = f"{ko} YoY (6개월 평균)"
+        m[f"{b}_momentum_3_12"] = f"{ko} YoY 모멘텀"
+        m[f"{b}_accel"]         = f"{ko} YoY 가속도"
+    # T10Y2Y: YoY 변환 없이 원본 사용
+    m["FRED_T10Y2Y"]       = "장단기 금리차 (10년-2년)"
+    m["FRED_T10Y2Y_lag6"]  = "장단기 금리차 (6개월 전)"
+    m["FRED_T10Y2Y_lag12"] = "장단기 금리차 (12개월 전)"
+    m["FRED_T10Y2Y_chg3"]  = "장단기 금리차 변화 (3개월)"
+
+    # ── ISM 파생 (Section D) ──
+    m["ISM_above50"] = "ISM 50 초과 여부 (제조업 확장)"
+    m["ISM_mom3"]    = "ISM 3개월 모멘텀"
+
+    # ── 계절성 (Section E) ──
+    m["month_sin"] = "계절성 (사인)"
+    m["month_cos"] = "계절성 (코사인)"
+
+    # ── Bear 선행 피처 (Section H) ──
+    m["T10Y3M"]              = "장단기 금리차 (10년-3개월)"
+    m["T10Y3M_chg3"]         = "금리차 3개월 변화"
+    m["T10Y3M_chg6"]         = "금리차 6개월 변화"
+    m["T10Y3M_inverted"]     = "금리 역전 여부"
+    m["T10Y3M_inv_streak"]   = "금리 역전 연속 기간"
+    m["T10Y3M_lag6"]         = "장단기 금리차 (6개월 전)"
+    m["T10Y3M_lag12"]        = "장단기 금리차 (12개월 전)"
+    m["InvSales"]            = "재고/매출 비율"
+    m["InvSales_diff3"]      = "재고/매출 변화 (3개월)"
+    m["InvSales_diff6"]      = "재고/매출 변화 (6개월)"
+    m["InvSales_lag6"]       = "재고/매출 비율 (6개월 전)"
+    m["InvSales_lag12"]      = "재고/매출 비율 (12개월 전)"
+    m["FedFunds"]            = "연방기금금리"
+    m["FedFunds_diff6"]      = "금리 변화 (6개월)"
+    m["FedFunds_diff12"]     = "금리 변화 (12개월)"
+    m["FedFunds_lag6"]       = "연방기금금리 (6개월 전)"
+    m["FedFunds_lag12"]      = "연방기금금리 (12개월 전)"
+
+    # ── Bridge (Stage 1 → Stage 2) ──
+    m["v2_pred_ww_yoy"] = "AI 반도체 경기 예측 (1단계 출력)"
+
+    return m
+
+
+_FEAT_MAP       = _build_feat_map()
+_FEAT_MAP_LOWER = {k.lower(): v for k, v in _FEAT_MAP.items()}
 
 
 def _translate_feat(name: str) -> str:
-    # 1) 완전 일치
-    if name in _FEAT_EXACT:
-        return _FEAT_EXACT[name]
-
-    low = name.lower()
-
-    # 2) FRED_ 계열
-    if low.startswith("fred_"):
-        rest = low[5:]
-        for key, ko in _FRED_KO.items():
-            if rest.startswith(key):
-                suffix = rest[len(key):]
-                return ko + _suffix_ko(suffix)
-        return "경제지표 " + rest
-
-    # 3) Ret_ 계열
-    if low.startswith("ret_"):
-        rest = low[4:]
-        for key, ko in _TICKER_KO.items():
-            if rest.startswith(key):
-                suffix = rest[len(key):]
-                return ko + " 수익률" + _suffix_ko(suffix)
-        return rest + " 수익률"
-
-    # 4) wsts_ 계열
-    if low.startswith("wsts_"):
-        rest = low[5:]
-        for region, ko in _REGION_KO.items():
-            if rest.startswith(region):
-                suffix = rest[len(region):]
-                return ko + " 반도체 매출" + _suffix_ko(suffix)
-        return "반도체 매출 " + rest
-
-    # 5) 지역명으로 시작하는 파생 피처 (예: europe_yoy_vs_ma24)
-    for region, ko in _REGION_KO.items():
-        if low.startswith(region):
-            rest = low[len(region):].lstrip("_")
-            return ko + " " + _metric_ko(rest)
-
-    # 6) v2_pred 계열
-    if low.startswith("v2_pred"):
-        return "AI 반도체 경기 예측" + _suffix_ko(low[7:])
-
-    # 7) 번역 불가 → 원본 반환
-    return name
-
-
-def _suffix_ko(s: str) -> str:
-    s = s.lstrip("_").lower()
-    if not s:
-        return ""
-    m = re.match(r"ma(\d+)$", s)
-    if m:
-        return f" ({m.group(1)}개월 평균)"
-    m = re.match(r"vol(\d+)$", s)
-    if m:
-        return f" ({m.group(1)}개월 변동성)"
-    m = re.match(r"lag(\d+)$", s)
-    if m:
-        return f" ({m.group(1)}개월 전)"
-    if s == "yoy":
-        return " YoY"
-    return f" ({s})"
-
-
-def _metric_ko(s: str) -> str:
-    s = s.lower()
-    m = re.match(r"yoy_vs_ma(\d+)", s)
-    if m:
-        return f"YoY vs {m.group(1)}개월 평균"
-    m = re.match(r"yoy_ma(\d+)", s)
-    if m:
-        return f"YoY {m.group(1)}개월 평균"
-    m = re.match(r"yoy_vol(\d+)", s)
-    if m:
-        return f"YoY {m.group(1)}개월 변동성"
-    m = re.match(r"yoy_lag(\d+)", s)
-    if m:
-        return f"YoY {m.group(1)}개월 전"
-    if s == "yoy":
-        return "YoY"
-    return _suffix_ko(s).strip(" ()")
+    return _FEAT_MAP.get(name) or _FEAT_MAP_LOWER.get(name.lower(), name)
 
 
 def render_shap_section(cfg: dict):
