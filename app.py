@@ -608,11 +608,16 @@ def render_shap_section(cfg: dict):
             marker_color=CLR_BLUE,
         ))
         fig.update_layout(
-            height=380,
+            height=400,
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=0, r=16, t=8, b=0),
-            yaxis=dict(autorange="reversed", gridcolor="rgba(0,0,0,0)", tickfont=dict(size=12)),
+            margin=dict(l=4, r=16, t=8, b=0),
+            yaxis=dict(
+                autorange="reversed",
+                automargin=True,
+                gridcolor="rgba(0,0,0,0)",
+                tickfont=dict(size=12),
+            ),
             xaxis=dict(gridcolor="rgba(136,135,128,0.15)", title="영향도"),
         )
         st.plotly_chart(fig, use_container_width=True)
