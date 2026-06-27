@@ -27,7 +27,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY")
 
 # 날짜 범위
 START_YEAR = 2000
-END_YEAR   = 2026
+END_YEAR   = 2099   # 미래 날짜 → yfinance/FRED는 오늘까지 데이터 반환
 
 # 타겟: SK하이닉스 6개월 종가 수익률 (%)
 PRIMARY_TARGET = "TARGET_SKH_6M_RET"

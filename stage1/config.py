@@ -21,7 +21,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY")
 
 # 데이터 수집 기간
 START_DATE = "1993-01-01"
-END_DATE   = "2026-03-31"
+END_DATE   = "2099-12-31"   # 미래 날짜 고정 → FRED/yfinance는 오늘까지 데이터 반환
 
 # 타겟
 PRIMARY_TARGET = "TARGET_Worldwide_YoY_T6"
