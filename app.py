@@ -1073,7 +1073,7 @@ def main():
 
     view = st.sidebar.radio(
         "메뉴",
-        ["🏠 한눈에 보기", "📈 SK하이닉스 전망", "📦 반도체 경기", "🔗 작동 원리"],
+        ["홈  한눈에 보기", "A.  SK하이닉스 전망", "B.  반도체 경기", "C.  작동 원리"],
         index=0,
     )
 
@@ -1082,12 +1082,23 @@ def main():
     st.sidebar.caption("SHAP·RMSE 등 전문 지표와 상세 수치를 함께 보여줘요.")
 
     st.sidebar.divider()
-    st.sidebar.markdown(
-        "**예측 3단계**\n\n"
-        "1. 🌐 반도체 경기 예측\n"
-        "2. 🔗 신호 연결\n"
-        "3. 📈 SK하이닉스 주가 전망"
-    )
+    with st.sidebar.expander("이 서비스는 어떻게 작동하나요?"):
+        st.markdown(
+            """
+**1. 데이터 수집**
+전 세계 반도체 출하량(WSTS), 미국 경제지표(FRED), 주요 반도체 기업 주가를 자동으로 모읍니다.
+
+**2. 반도체 경기 예측 (B)**
+수집한 데이터를 AI 모델에 넣어 6개월 뒤 반도체 시장이 성장할지 예측합니다.
+
+**3. SK하이닉스 주가 전망 (A)**
+반도체 경기 예측 결과를 포함한 신호들로 SK하이닉스 주가가 6개월 뒤 오를지 내릴지 판단합니다.
+
+**4. 주기적 업데이트**
+분기마다 (1·4·7·10월) 새 데이터로 모델을 다시 학습해 예측을 갱신합니다.
+"""
+        )
+
     st.sidebar.divider()
     now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
     st.sidebar.markdown(
@@ -1104,11 +1115,11 @@ def main():
 
     st.title("반도체 사이클 기반 SK하이닉스 수익률 예측")
 
-    if view.startswith("🏠"):
+    if view.startswith("홈"):
         view_home(expert_mode)
-    elif view.startswith("📈"):
+    elif view.startswith("A."):
         view_stage2(expert_mode)
-    elif view.startswith("📦"):
+    elif view.startswith("B."):
         view_stage1(expert_mode)
     else:
         view_e2e(expert_mode)
