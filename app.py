@@ -932,6 +932,9 @@ def view_stage1(expert_mode: bool = False):
 
     render_detail_sections(metrics, df, "stage1", expert_mode)
 
+    with st.expander("🔬 SHAP 피처 중요도"):
+        render_shap_section(cfg)
+
     with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
         st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
         render_ribbon_chart(df, metrics["rmse"])
@@ -945,9 +948,6 @@ def view_stage1(expert_mode: bool = False):
             "Bear 오예측 시 3배 페널티가 적용돼 하락 경고를 놓치지 않도록 설계됐어요. "
             "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요."
         )
-
-    with st.expander("🔬 SHAP 피처 중요도"):
-        render_shap_section(cfg)
 
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
@@ -974,6 +974,9 @@ def view_stage2(expert_mode: bool = False):
 
     render_detail_sections(metrics, df, "stage2", expert_mode)
 
+    with st.expander("🔬 SHAP 피처 중요도"):
+        render_shap_section(cfg)
+
     with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
         st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
         render_ribbon_chart(df, metrics["rmse"], height=340)
@@ -992,9 +995,6 @@ def view_stage2(expert_mode: bool = False):
 
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
-
-    with st.expander("🔬 SHAP 피처 중요도"):
-        render_shap_section(cfg)
 
     with st.expander("🎯 적중 히스토리"):
         render_hit_history(df, cfg["freq_label"], expert_mode)
@@ -1167,18 +1167,22 @@ def view_e2e(expert_mode: bool = False):
         st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
 
     st.divider()
-    st.markdown("#### ② Bridge 피처 결합 확인")
+    st.markdown("#### ② 두 모델 연결 확인")
+    st.caption(
+        "1단계(반도체 경기 예측) 모델의 출력값이 2단계(SK하이닉스 전망) 모델의 "
+        "입력 피처로 전달돼야 두 단계가 올바르게 연결돼요. "
+        "이 섹션은 그 연결이 정상적으로 이루어졌는지 확인해요."
+    )
     try:
         s2feat = load_csv(STAGE2["features_path"])
         if BRIDGE_COL in s2feat.columns:
-            st.success(f"Stage 2 피처셋에 `{BRIDGE_COL}` 포함 — 두 단계 정상 연결")
-            n_total  = s2feat.shape[1]
-            n_bridge = sum(1 for c in s2feat.columns if c.startswith("v2_pred"))
-            m1, m2 = st.columns(2)
-            m1.metric("전체 피처 수", f"{n_total}개")
-            m2.metric("Bridge 피처", f"{n_bridge}개")
+            st.success(
+                "✅ 두 단계 정상 연결 — "
+                "반도체 경기 예측값(`v2_pred_ww_yoy`)이 SK하이닉스 전망 모델의 "
+                f"입력 피처로 포함되어 있어요. (전체 피처 {s2feat.shape[1]}개 중 하나)"
+            )
         else:
-            st.warning(f"Stage 2 피처셋에서 `{BRIDGE_COL}`를 찾지 못했습니다.")
+            st.warning("⚠️ 연결 피처를 찾지 못했습니다. 파이프라인 재실행이 필요할 수 있어요.")
     except Exception as e:
         st.error(f"Stage 2 피처 데이터 로드 실패: {e}")
 
@@ -1247,6 +1251,15 @@ def main():
         f"🤖 <b>AI 예측 기준</b>: 2025년 10월<br>"
         f"🕐 <b>페이지 로드</b>: {now_kst}"
         f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.sidebar.divider()
+    st.sidebar.markdown(
+        "<div style='font-size:11px;color:#aaa;line-height:1.7;text-align:center'>"
+        "고려대학교 KUBIG<br>"
+        "26학년도 1학기 컨퍼런스 스터디"
+        "</div>",
         unsafe_allow_html=True,
     )
 
