@@ -817,24 +817,23 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요."
         )
     else:
-        # ── 전문가: 상세 아코디언 (모델 성능 분석은 별도로 앞에 비토글 표시) ──
+        # ── 전문가: 리스크 비토글 → 예측수치 토글 ──
         st.markdown("#### 🔍 세부 분석")
+
+        bear_dir = dir_bear or 0
+        _signal_rows([
+            ("Bear DirAcc 안정성", _fmt_bear(dir_bear),
+             "dn" if bear_dir < 60 else "up"),
+            ("RMSE 대비 예측 신뢰", f"{rmse:.2f}", "neu"),
+        ])
+        _caution_box(
+            "이 예측은 과거 데이터 패턴 기반의 통계 모델 출력값입니다. "
+            "규제 리스크, 지정학적 이벤트, 기업 내부 정보 등 구조적 변화는 "
+            "반영되지 않습니다. 투자 결정 시 이 수치만 단독으로 활용하지 마세요."
+        )
 
         with st.expander("📈 예측 vs 실제 흐름 (수치)", expanded=False):
             st.dataframe(out_df.style.format("{:.2f}"), use_container_width=True)
-
-        with st.expander("⚠️ 리스크 & 주의사항", expanded=False):
-            bear_dir = dir_bear or 0
-            _signal_rows([
-                ("Bear DirAcc 안정성", _fmt_bear(dir_bear),
-                 "dn" if bear_dir < 60 else "up"),
-                ("RMSE 대비 예측 신뢰", f"{rmse:.2f}", "neu"),
-            ])
-            _caution_box(
-                "이 예측은 과거 데이터 패턴 기반의 통계 모델 출력값입니다. "
-                "규제 리스크, 지정학적 이벤트, 기업 내부 정보 등 구조적 변화는 "
-                "반영되지 않습니다. 투자 결정 시 이 수치만 단독으로 활용하지 마세요."
-            )
 
 
 
