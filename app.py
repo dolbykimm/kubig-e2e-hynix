@@ -795,20 +795,14 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "현재 사이클 지표는 하락 구간을 시사하고 있어요 📉 "
                 "**→ 재고 조정 국면** 에 주의가 필요해요."
             )
-        if dir_bear is not None:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("방향 정확도", _fmt(dir_acc, pct=True))
-            with c2:
-                st.metric("오차 (RMSE)", f"{rmse:.3f}")
-            with c3:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("방향 정확도", _fmt(dir_acc, pct=True))
+        with c2:
+            st.metric("오차 (RMSE)", f"{rmse:.3f}")
+        with c3:
+            if dir_bear is not None:
                 st.metric("Bear 정확도", _fmt(dir_bear, pct=True))
-        else:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("방향 정확도", _fmt(dir_acc, pct=True))
-            with c2:
-                st.metric("오차 (RMSE)", f"{rmse:.3f}")
         st.markdown("---")
 
     if not expert_mode:
