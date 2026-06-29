@@ -741,19 +741,12 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "현재 사이클 지표는 하락 구간을 시사하고 있어요 📉 "
                 "**→ 재고 조정 국면** 에 주의가 필요해요."
             )
-        # ── 비전문가 모드: 방향정확도·RMSE·신뢰수준 미니 요약 ──
-        lvl, lvl_fg, lvl_bg = _confidence_level(dir_acc)
-        c1, c2, c3 = st.columns(3)
+        # ── 비전문가 모드: 방향정확도·RMSE 미니 요약 ──
+        c1, c2 = st.columns(2)
         with c1:
             st.metric("방향 정확도", _fmt(dir_acc, pct=True))
         with c2:
             st.metric("오차 (RMSE)", f"{rmse:.3f}")
-        with c3:
-            st.markdown(
-                f"**신뢰 수준**<br>"
-                f"{_pill(lvl, lvl_bg, lvl_fg)}",
-                unsafe_allow_html=True,
-            )
 
     st.markdown("---")
 
@@ -837,7 +830,7 @@ def render_confusion(df: pd.DataFrame):
     st.dataframe(cm.style.background_gradient(cmap="Blues"), use_container_width=True)
 
 
-def render_hit_history(out_df: pd.DataFrame, freq_label: str):
+def render_hit_history(out_df: pd.DataFrame, freq_label: str, expert_mode: bool = False):
     st.markdown("#### 🎯 과거 적중 히스토리 (Hold-out)")
     d = out_df.copy()
     d["적중"] = (d["실제값"] > 0) == (d["예측값"] > 0)
@@ -855,14 +848,14 @@ def render_hit_history(out_df: pd.DataFrame, freq_label: str):
             unsafe_allow_html=True,
         )
 
-    table = pd.DataFrame({
-        "예측 방향": ["📈 상승" if v > 0 else "📉 하락" for v in d["예측값"]],
-        "실제 방향": ["📈 상승" if v > 0 else "📉 하락" for v in d["실제값"]],
-        "예측값": [f"{v:+.2f}%" for v in d["예측값"]],
-        "실제값": [f"{v:+.2f}%" for v in d["실제값"]],
-        "결과": ["✅" if v else "❌" for v in d["적중"]],
-    }, index=d.index.strftime("%Y-%m"))
-    with st.expander("적중 히스토리 상세"):
+    if expert_mode:
+        table = pd.DataFrame({
+            "예측 방향": ["📈 상승" if v > 0 else "📉 하락" for v in d["예측값"]],
+            "실제 방향": ["📈 상승" if v > 0 else "📉 하락" for v in d["실제값"]],
+            "예측값": [f"{v:+.2f}%" for v in d["예측값"]],
+            "실제값": [f"{v:+.2f}%" for v in d["실제값"]],
+            "결과": ["✅" if v else "❌" for v in d["적중"]],
+        }, index=d.index.strftime("%Y-%m"))
         st.dataframe(table, use_container_width=True)
 
 
@@ -905,7 +898,7 @@ def view_stage1(expert_mode: bool = False):
         render_shap_section(cfg)
 
     with st.expander("🎯 적중 히스토리"):
-        render_hit_history(df, cfg["freq_label"])
+        render_hit_history(df, cfg["freq_label"], expert_mode)
 
 
 def view_stage2(expert_mode: bool = False):
@@ -949,7 +942,7 @@ def view_stage2(expert_mode: bool = False):
         render_shap_section(cfg)
 
     with st.expander("🎯 적중 히스토리"):
-        render_hit_history(df, cfg["freq_label"])
+        render_hit_history(df, cfg["freq_label"], expert_mode)
 
 
 def _flow_box(title: str, subtitle: str, code: str = None):
