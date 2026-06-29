@@ -782,14 +782,9 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
     pred_last = float(out_df["예측값"].iloc[-1])
     is_up     = pred_last > 0
 
-    # ── 📊 한 줄 요약 ──
-    st.markdown("#### 📊 한 줄 요약")
-    if expert_mode:
-        st.markdown(
-            f"방향 정확도 **{_fmt(dir_acc, pct=True)}** (Bear {_fmt(dir_bear, pct=True)}) · "
-            f"RMSE **{rmse:.2f}** · AsymLoss **{asym:.2f}** · Hold-out {n_ho}개 기준."
-        )
-    else:
+    if not expert_mode:
+        # ── 📊 한 줄 요약 (비전문가 전용) ──
+        st.markdown("#### 📊 한 줄 요약")
         if is_up:
             st.markdown(
                 "반도체 사이클 지표가 상승 구간을 가리키고 있어요 📈 "
@@ -800,14 +795,12 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "현재 사이클 지표는 하락 구간을 시사하고 있어요 📉 "
                 "**→ 재고 조정 국면** 에 주의가 필요해요."
             )
-        # ── 비전문가 모드: 방향정확도·RMSE 미니 요약 ──
         c1, c2 = st.columns(2)
         with c1:
             st.metric("방향 정확도", _fmt(dir_acc, pct=True))
         with c2:
             st.metric("오차 (RMSE)", f"{rmse:.3f}")
-
-    st.markdown("---")
+        st.markdown("---")
 
     # ── 🔍 세부 분석 아코디언 ──
     st.markdown("#### 🔍 세부 분석")
@@ -944,14 +937,14 @@ def view_stage1(expert_mode: bool = False):
         render_ribbon_chart(df, metrics["rmse"])
 
     if expert_mode:
-        with st.expander("📊 상세 성능 지표"):
-            st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
-            render_metric_cards(metrics)
-            st.markdown(
-                "**Asymmetric Loss** — 하락 구간에 더 높은 페널티를 부여한 가중 RMSE예요. "
-                "Bear 오예측 시 3배 페널티가 적용돼 하락 경고를 놓치지 않도록 설계됐어요. "
-                "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요."
-            )
+        st.markdown("#### 📊 모델 성능 분석")
+        st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
+        render_metric_cards(metrics)
+        st.markdown(
+            "**Asymmetric Loss** — 하락 구간에 더 높은 페널티를 부여한 가중 RMSE예요. "
+            "Bear 오예측 시 3배 페널티가 적용돼 하락 경고를 놓치지 않도록 설계됐어요. "
+            "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요."
+        )
 
     with st.expander("🔬 SHAP 피처 중요도"):
         render_shap_section(cfg)
@@ -986,16 +979,16 @@ def view_stage2(expert_mode: bool = False):
         render_ribbon_chart(df, metrics["rmse"], height=340)
 
     if expert_mode:
-        with st.expander("📊 상세 성능 지표"):
-            st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
-            render_metric_cards(metrics, with_ic=True)
-            st.markdown(
-                "**Asymmetric Loss** — 하락 구간에 더 높은 페널티를 부여한 가중 RMSE예요. "
-                "Bear 오예측 시 3배 페널티가 적용돼 하락 경고를 놓치지 않도록 설계됐어요. "
-                "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요.  \n"
-                "**IC (Spearman)** — 예측 수익률 순위와 실제 수익률 순위가 얼마나 일치하는지 "
-                "나타내요. 1에 가까울수록 크기 예측도 정확하고, 0이면 순위 예측력 없음이에요."
-            )
+        st.markdown("#### 📊 모델 성능 분석")
+        st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
+        render_metric_cards(metrics, with_ic=True)
+        st.markdown(
+            "**Asymmetric Loss** — 하락 구간에 더 높은 페널티를 부여한 가중 RMSE예요. "
+            "Bear 오예측 시 3배 페널티가 적용돼 하락 경고를 놓치지 않도록 설계됐어요. "
+            "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요.  \n"
+            "**IC (Spearman)** — 예측 수익률 순위와 실제 수익률 순위가 얼마나 일치하는지 "
+            "나타내요. 1에 가까울수록 크기 예측도 정확하고, 0이면 순위 예측력 없음이에요."
+        )
 
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
