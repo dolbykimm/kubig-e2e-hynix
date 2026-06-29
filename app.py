@@ -795,19 +795,23 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "현재 사이클 지표는 하락 구간을 시사하고 있어요 📉 "
                 "**→ 재고 조정 국면** 에 주의가 필요해요."
             )
-        c1, c2 = st.columns(2)
-        with c1:
-            st.metric("방향 정확도", _fmt(dir_acc, pct=True))
-        with c2:
-            st.metric("오차 (RMSE)", f"{rmse:.3f}")
+        if dir_bear is not None:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("방향 정확도", _fmt(dir_acc, pct=True))
+            with c2:
+                st.metric("오차 (RMSE)", f"{rmse:.3f}")
+            with c3:
+                st.metric("Bear 정확도", _fmt(dir_bear, pct=True))
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("방향 정확도", _fmt(dir_acc, pct=True))
+            with c2:
+                st.metric("오차 (RMSE)", f"{rmse:.3f}")
         st.markdown("---")
 
     if not expert_mode:
-        # ── 비전문가: 1문장 항목은 직접 표시, 시각 항목만 단일 토글 ──
-        st.markdown(
-            f"모델이 방향을 **{_fmt(dir_acc, pct=True)}** 정확도로 맞혔어요. "
-            f"Bear(하락) 구간 정확도는 **{_fmt_bear(dir_bear)}** 이에요."
-        )
         st.caption(
             "이 예측은 참고용이에요. "
             "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요."
