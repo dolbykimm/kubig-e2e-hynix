@@ -912,8 +912,6 @@ def view_stage1(expert_mode: bool = False):
         st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
         render_ribbon_chart(df, metrics["rmse"])
 
-    with st.expander("🔀 방향 예측 혼동행렬"):
-        render_confusion(df)
 
     with st.expander("🎯 신뢰도 & 적중 히스토리"):
         _dir_acc  = metrics["dir_acc"]
@@ -966,8 +964,6 @@ def view_stage2(expert_mode: bool = False):
         st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
         render_ribbon_chart(df, metrics["rmse"], height=340)
 
-    with st.expander("🔀 방향 예측 혼동행렬"):
-        render_confusion(df)
 
     with st.expander("🎯 신뢰도 & 적중 히스토리"):
         _dir_acc  = metrics["dir_acc"]
