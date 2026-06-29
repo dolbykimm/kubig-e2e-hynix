@@ -1085,88 +1085,68 @@ def view_home(expert_mode: bool = False):
 
 
 def view_e2e(expert_mode: bool = False):
-    st.header("🔗 예측은 어떻게 작동하나요?")
-    st.caption("반도체 경기 예측이 SK하이닉스 주가 전망으로 이어지는 전체 과정을 보여줘요.")
+    st.header("🔗 작동 원리")
 
-    f1, fa, f2, fb, f3 = st.columns([4, 1, 4, 1, 4])
-    with f1:
-        _flow_box("🌐 1단계", "반도체 경기 예측",
-                  "best_xgboost_final.pkl" if expert_mode else None)
-    with fa:
-        _flow_arrow()
-    with f2:
-        _flow_box("🔗 연결", "예측 결과를 다음 단계로 전달",
-                  BRIDGE_COL if expert_mode else None)
-    with fb:
-        _flow_arrow()
-    with f3:
-        _flow_box("📈 2단계", "SK하이닉스 주가 전망",
-                  "skh_xgb_final.pkl" if expert_mode else None)
+    st.markdown("#### ① Stage 1 출력 시계열")
+    st.caption(f"lookahead 없이 재학습한 6개월 선행 반도체 매출 YoY 예측값(`{BRIDGE_COL}`)")
+    try:
+        s1pred = load_csv(STAGE1_PRED_PATH)
+        if BRIDGE_COL in s1pred.columns:
+            s1_data = s1pred[[BRIDGE_COL]].dropna()
+            fig = go.Figure(go.Scatter(
+                x=s1_data.index, y=s1_data[BRIDGE_COL],
+                line=dict(color=CLR_BLUE, width=2),
+                mode="lines+markers", marker=dict(size=4),
+            ))
+            fig.update_layout(
+                height=280,
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                showlegend=False, margin=dict(l=0, r=0, t=8, b=0),
+                yaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
+                xaxis=dict(showgrid=False),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning(f"`{BRIDGE_COL}` 컬럼을 찾을 수 없습니다.")
+    except Exception as e:
+        st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
 
     st.divider()
+    st.markdown("#### ② Bridge 피처 결합 확인")
+    try:
+        s2feat = load_csv(STAGE2["features_path"])
+        if BRIDGE_COL in s2feat.columns:
+            st.success(f"Stage 2 피처셋에 `{BRIDGE_COL}` 포함 — 두 단계 정상 연결")
+            n_total  = s2feat.shape[1]
+            n_bridge = sum(1 for c in s2feat.columns if c.startswith("v2_pred"))
+            m1, m2 = st.columns(2)
+            m1.metric("전체 피처 수", f"{n_total}개")
+            m2.metric("Bridge 피처", f"{n_bridge}개")
+        else:
+            st.warning(f"Stage 2 피처셋에서 `{BRIDGE_COL}`를 찾지 못했습니다.")
+    except Exception as e:
+        st.error(f"Stage 2 피처 데이터 로드 실패: {e}")
 
-    # ── 1차 노출: 현재 시장 신호 ──
-    render_market_signals()
-
-    # ── 2차: 토글로 숨긴 기술 상세 ──
-    with st.expander("① Stage 1 출력 시계열"):
-        st.caption(f"lookahead 없이 재학습한 6개월 선행 반도체 매출 YoY 예측값(`{BRIDGE_COL}`)")
+    st.divider()
+    st.markdown("#### ③ 두 단계 성능 요약")
+    rows = []
+    for cfg, with_ic in [(STAGE1, False), (STAGE2, True)]:
         try:
-            s1pred = load_csv(STAGE1_PRED_PATH)
-            if BRIDGE_COL in s1pred.columns:
-                s1_data = s1pred[[BRIDGE_COL]].dropna()
-                fig = go.Figure(go.Scatter(
-                    x=s1_data.index, y=s1_data[BRIDGE_COL],
-                    line=dict(color=CLR_BLUE, width=2),
-                    mode="lines+markers", marker=dict(size=4),
-                ))
-                fig.update_layout(
-                    height=280,
-                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                    showlegend=False, margin=dict(l=0, r=0, t=8, b=0),
-                    yaxis=dict(gridcolor="rgba(136,135,128,0.15)"),
-                    xaxis=dict(showgrid=False),
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning(f"`{BRIDGE_COL}` 컬럼을 찾을 수 없습니다.")
+            m, _ = evaluate_stage(
+                cfg["features_path"], cfg["model_path"], cfg["target"],
+                cfg["test_eval"], with_ic=with_ic
+            )
+            rows.append({
+                "단계": f"{cfg['name']} · {cfg['title']}",
+                "방향정확도(전체)": _fmt(m["dir_acc"], pct=True),
+                "방향정확도(Bear)": _fmt_bear(m.get("dir_bear")),
+                "RMSE": _fmt(m["rmse"]),
+                "Asym Loss": _fmt(m["asym_loss"]),
+                "IC": _fmt(m.get("ic")) if with_ic else "—",
+            })
         except Exception as e:
-            st.error(f"Stage 1 예측 데이터 로드 실패: {e}")
-
-    with st.expander("② Bridge 피처 결합 확인"):
-        try:
-            s2feat = load_csv(STAGE2["features_path"])
-            if BRIDGE_COL in s2feat.columns:
-                st.success(f"Stage 2 피처셋에 `{BRIDGE_COL}` 포함 — 두 단계 정상 연결")
-                n_total  = s2feat.shape[1]
-                n_bridge = sum(1 for c in s2feat.columns if c.startswith("v2_pred"))
-                m1, m2 = st.columns(2)
-                m1.metric("전체 피처 수", f"{n_total}개")
-                m2.metric("Bridge 피처", f"{n_bridge}개")
-            else:
-                st.warning(f"Stage 2 피처셋에서 `{BRIDGE_COL}`를 찾지 못했습니다.")
-        except Exception as e:
-            st.error(f"Stage 2 피처 데이터 로드 실패: {e}")
-
-    with st.expander("③ 두 단계 성능 요약"):
-        rows = []
-        for cfg, with_ic in [(STAGE1, False), (STAGE2, True)]:
-            try:
-                m, _ = evaluate_stage(
-                    cfg["features_path"], cfg["model_path"], cfg["target"],
-                    cfg["test_eval"], with_ic=with_ic
-                )
-                rows.append({
-                    "단계": f"{cfg['name']} · {cfg['title']}",
-                    "방향정확도(전체)": _fmt(m["dir_acc"], pct=True),
-                    "방향정확도(Bear)": _fmt_bear(m.get("dir_bear")),
-                    "RMSE": _fmt(m["rmse"]),
-                    "Asym Loss": _fmt(m["asym_loss"]),
-                    "IC": _fmt(m.get("ic")) if with_ic else "—",
-                })
-            except Exception as e:
-                rows.append({"단계": cfg["name"], "방향정확도(전체)": f"오류: {e}"})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            rows.append({"단계": cfg["name"], "방향정확도(전체)": f"오류: {e}"})
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ──────────────────────────────────────────────────────────────────
