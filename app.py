@@ -802,11 +802,30 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             st.metric("오차 (RMSE)", f"{rmse:.3f}")
         st.markdown("---")
 
-    # ── 🔍 세부 분석 아코디언 ──
-    st.markdown("#### 🔍 세부 분석")
+    if not expert_mode:
+        # ── 비전문가: 1문장 항목은 직접 표시, 시각 항목만 단일 토글 ──
+        st.markdown(
+            f"모델이 방향을 **{_fmt(dir_acc, pct=True)}** 정확도로 맞혔어요. "
+            f"Bear(하락) 구간 정확도는 **{_fmt_bear(dir_bear)}** 이에요."
+        )
+        st.caption(
+            "이 예측은 참고용이에요. "
+            "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요."
+        )
+        with st.expander("📋 모델 신뢰도"):
+            conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
+            _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
+            if dir_bear is not None:
+                bear_color = (CLR_TEAL if dir_bear >= 60
+                              else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
+                st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+                _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
+    else:
+        # ── 전문가: 상세 아코디언 4개 ──
+        st.markdown("#### 🔍 세부 분석")
 
-    with st.expander("📡 모델 성능 분석", expanded=False):
-        if expert_mode:
+        with st.expander("📡 모델 성능 분석", expanded=False):
+            bear_dir = dir_bear or 0
             st.markdown(
                 f"**Hold-out 평가 결과** (`{metrics.get('period', '')}`)\n\n"
                 f"- 방향 정확도(전체): **{_fmt(dir_acc, pct=True)}**\n"
@@ -814,7 +833,6 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 f"- RMSE: **{rmse:.3f}** · AsymLoss: **{asym:.3f}**\n"
                 f"- 평가 샘플 수: {n_ho}개"
             )
-            bear_dir = dir_bear or 0
             _signal_rows([
                 ("방향 정확도 (전체)", _fmt(dir_acc, pct=True),
                  "up" if dir_acc >= 70 else "dn"),
@@ -823,24 +841,11 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 ("RMSE", f"{rmse:.3f}", "neu"),
                 ("AsymLoss", f"{asym:.3f}", "neu"),
             ])
-        else:
-            st.markdown(
-                f"모델이 방향을 **{_fmt(dir_acc, pct=True)}** 정확도로 맞혔어요. "
-                f"Bear(하락) 구간 정확도는 **{_fmt_bear(dir_bear)}** 이에요."
-            )
 
-    with st.expander("📈 예측 vs 실제 흐름", expanded=False):
-        if expert_mode:
-            st.markdown("**Hold-out 구간 예측/실제값 (수치)**")
+        with st.expander("📈 예측 vs 실제 흐름 (수치)", expanded=False):
             st.dataframe(out_df.style.format("{:.2f}"), use_container_width=True)
-        else:
-            st.markdown(
-                "최근 예측과 실제 흐름을 보여줘요. "
-                "초록 선이 실제, 파란 점선이 예측이에요."
-            )
 
-    with st.expander("⚠️ 리스크 & 주의사항", expanded=False):
-        if expert_mode:
+        with st.expander("⚠️ 리스크 & 주의사항", expanded=False):
             bear_dir = dir_bear or 0
             _signal_rows([
                 ("Bear DirAcc 안정성", _fmt_bear(dir_bear),
@@ -852,20 +857,15 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "규제 리스크, 지정학적 이벤트, 기업 내부 정보 등 구조적 변화는 "
                 "반영되지 않습니다. 투자 결정 시 이 수치만 단독으로 활용하지 마세요."
             )
-        else:
-            st.markdown(
-                "이 예측은 참고용이에요. "
-                "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요. 🙏"
-            )
 
-    with st.expander("🎯 모델 신뢰도"):
-        conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
-        _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
-        if dir_bear is not None:
-            bear_color = (CLR_TEAL if dir_bear >= 60
-                          else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
-            st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-            _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
+        with st.expander("🎯 모델 신뢰도"):
+            conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
+            _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
+            if dir_bear is not None:
+                bear_color = (CLR_TEAL if dir_bear >= 60
+                              else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
+                st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+                _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
 
 
 def render_confusion(df: pd.DataFrame):
