@@ -812,14 +812,6 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             "이 예측은 참고용이에요. "
             "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요."
         )
-        with st.expander("📋 모델 신뢰도"):
-            conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
-            _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
-            if dir_bear is not None:
-                bear_color = (CLR_TEAL if dir_bear >= 60
-                              else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
-                st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-                _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
     else:
         # ── 전문가: 상세 아코디언 4개 ──
         st.markdown("#### 🔍 세부 분석")
@@ -858,14 +850,6 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
                 "반영되지 않습니다. 투자 결정 시 이 수치만 단독으로 활용하지 마세요."
             )
 
-        with st.expander("🎯 모델 신뢰도"):
-            conf_color = CLR_TEAL if dir_acc >= 75 else (CLR_AMBER if dir_acc >= 60 else CLR_RED)
-            _confidence_bar(dir_acc, "방향 정확도 기반 신뢰도", conf_color)
-            if dir_bear is not None:
-                bear_color = (CLR_TEAL if dir_bear >= 60
-                              else (CLR_AMBER if dir_bear >= 40 else CLR_RED))
-                st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-                _confidence_bar(dir_bear, "Bear 정확도 (하락 예측 신뢰도)", bear_color)
 
 
 def render_confusion(df: pd.DataFrame):
@@ -952,7 +936,17 @@ def view_stage1(expert_mode: bool = False):
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
 
-    with st.expander("🎯 적중 히스토리"):
+    with st.expander("🎯 신뢰도 & 적중 히스토리"):
+        _dir_acc  = metrics["dir_acc"]
+        _dir_bear = metrics.get("dir_bear")
+        _conf_fg  = CLR_TEAL if _dir_acc >= 75 else (CLR_AMBER if _dir_acc >= 60 else CLR_RED)
+        _confidence_bar(_dir_acc, "방향 정확도 기반 신뢰도", _conf_fg)
+        if _dir_bear is not None:
+            _bear_fg = (CLR_TEAL if _dir_bear >= 60
+                        else (CLR_AMBER if _dir_bear >= 40 else CLR_RED))
+            st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+            _confidence_bar(_dir_bear, "Bear 정확도 (하락 예측 신뢰도)", _bear_fg)
+        st.divider()
         render_hit_history(df, cfg["freq_label"], expert_mode)
 
 
@@ -996,7 +990,17 @@ def view_stage2(expert_mode: bool = False):
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
 
-    with st.expander("🎯 적중 히스토리"):
+    with st.expander("🎯 신뢰도 & 적중 히스토리"):
+        _dir_acc  = metrics["dir_acc"]
+        _dir_bear = metrics.get("dir_bear")
+        _conf_fg  = CLR_TEAL if _dir_acc >= 75 else (CLR_AMBER if _dir_acc >= 60 else CLR_RED)
+        _confidence_bar(_dir_acc, "방향 정확도 기반 신뢰도", _conf_fg)
+        if _dir_bear is not None:
+            _bear_fg = (CLR_TEAL if _dir_bear >= 60
+                        else (CLR_AMBER if _dir_bear >= 40 else CLR_RED))
+            st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+            _confidence_bar(_dir_bear, "Bear 정확도 (하락 예측 신뢰도)", _bear_fg)
+        st.divider()
         render_hit_history(df, cfg["freq_label"], expert_mode)
 
 
