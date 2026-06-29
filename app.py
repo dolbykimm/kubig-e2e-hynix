@@ -660,7 +660,66 @@ def _build_feat_map() -> dict:
     m["FedFunds_lag12"]      = "연방기금금리 (12개월 전)"
 
     # ── Bridge (Stage 1 → Stage 2) ──
-    m["v2_pred_ww_yoy"] = "AI 반도체 경기 예측 (1단계 출력)"
+    m["v2_pred_ww_yoy"]       = "AI 반도체 경기 예측 (1단계 출력)"
+    m["v2_pred_vs_current"]   = "AI 예측 vs 현재 YoY 괴리"
+    m["v2_pred_bull"]         = "AI 반도체 경기 상승 신호"
+
+    # ── Stage 2 전용: SK하이닉스 기술적 지표 ──
+    m["SKH_price_obs"]    = "SK하이닉스 관찰 주가"
+    m["SKH_log_price_obs"] = "SK하이닉스 관찰 주가 (로그)"
+    m["SKH_ret_1m"]       = "SK하이닉스 수익률 (1개월)"
+    m["SKH_ret_3m"]       = "SK하이닉스 수익률 (3개월)"
+    m["SKH_ret_6m"]       = "SK하이닉스 수익률 (6개월)"
+    m["SKH_ret_12m"]      = "SK하이닉스 수익률 (12개월)"
+    m["SKH_vol_60d"]      = "SK하이닉스 변동성 (60일)"
+    m["SKH_RSI_14"]       = "SK하이닉스 RSI (14일)"
+    m["SKH_vs_ma60"]      = "SK하이닉스 vs MA60"
+    m["SKH_vs_ma120"]     = "SK하이닉스 vs MA120"
+    m["SKH_52w_pct"]      = "SK하이닉스 52주 고저 위치"
+
+    # ── Stage 2 전용: 시장 센티먼트 ──
+    m["VIX_level"]        = "VIX 공포지수"
+    m["VIX_chg_1m"]       = "VIX 변화 (1개월)"
+    m["SOX_vs_SPX_3m"]    = "SOX vs S&P500 상대 수익률 (3개월)"
+
+    _s2_tickers = {
+        "SOX": "반도체지수 SOX", "NVDA": "NVIDIA", "TSM": "TSMC",
+        "ASML": "ASML", "Samsung": "삼성전자", "SPX": "S&P500",
+    }
+    for t, ko in _s2_tickers.items():
+        for mo in [1, 3, 6]:
+            m[f"{t}_ret_{mo}m"] = f"{ko} 수익률 ({mo}개월)"
+
+    # ── Stage 2 전용: WSTS (분기 기준) ──
+    m["WSTS_WW_YoY"]          = "전세계 반도체 매출 YoY"
+    m["WSTS_WW_YoY_ma3"]      = "전세계 반도체 매출 YoY (3분기 평균)"
+    m["WSTS_WW_YoY_ma6"]      = "전세계 반도체 매출 YoY (6분기 평균)"
+    m["WSTS_WW_YoY_mom_3_12"] = "전세계 반도체 YoY 모멘텀"
+    m["WSTS_WW_cycle_pos"]    = "전세계 반도체 사이클 위치"
+    m["WSTS_AP_YoY"]          = "아태지역 반도체 매출 YoY"
+    m["WSTS_AP_YoY_ma3"]      = "아태지역 반도체 매출 YoY (3분기 평균)"
+
+    # ── Stage 2 전용: FRED (분기 기준) ──
+    m["T10Y2Y_chg3"]    = "장단기 금리차 변화 (3분기)"
+    m["FedFunds_chg3"]  = "연방기금금리 변화 (3분기)"
+    m["T10Y3M_chg3"]    = "장단기 금리차 변화 (3분기, 10년-3개월)"
+    m["IndProd_YoY"]    = "산업생산지수 YoY"
+    m["PCE_Core_YoY"]   = "근원 PCE 물가 YoY"
+    m["ConsSenti"]      = "소비자 심리지수"
+    m["ConsSenti_chg3"] = "소비자 심리지수 변화 (3분기)"
+
+    # ── Stage 2 전용: 환율·원자재 ──
+    m["Oil_ret_3m"]    = "WTI 유가 수익률 (3개월)"
+    m["Oil_ret_6m"]    = "WTI 유가 수익률 (6개월)"
+    m["USDKRW_ret_3m"] = "USD/KRW 환율 변화 (3개월)"
+    m["USDKRW_ret_6m"] = "USD/KRW 환율 변화 (6개월)"
+
+    # ── Stage 2 전용: 달력·사이클 ──
+    m["earnings_quarter"] = "실적 발표 분기"
+    m["quarter_sin"]      = "분기 계절성 (사인)"
+    m["quarter_cos"]      = "분기 계절성 (코사인)"
+    m["supercycle_pos"]   = "반도체 4년 슈퍼사이클 위치"
+    m["years_since_2000"] = "2000년 이후 경과 연수"
 
     return m
 
@@ -894,8 +953,11 @@ def view_stage1(expert_mode: bool = False):
                 "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요."
             )
 
-    with st.expander("🔬 예측에 영향을 준 주요 지표"):
+    with st.expander("🔬 SHAP 피처 중요도"):
         render_shap_section(cfg)
+
+    with st.expander("🔀 방향 예측 혼동행렬"):
+        render_confusion(df)
 
     with st.expander("🎯 적중 히스토리"):
         render_hit_history(df, cfg["freq_label"], expert_mode)
