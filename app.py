@@ -817,26 +817,8 @@ def render_detail_sections(metrics: dict, out_df: pd.DataFrame,
             "실제 투자 결정에는 다양한 요소를 종합적으로 고려해주세요."
         )
     else:
-        # ── 전문가: 상세 아코디언 4개 ──
+        # ── 전문가: 상세 아코디언 (모델 성능 분석은 별도로 앞에 비토글 표시) ──
         st.markdown("#### 🔍 세부 분석")
-
-        with st.expander("📡 모델 성능 분석", expanded=False):
-            bear_dir = dir_bear or 0
-            st.markdown(
-                f"**Hold-out 평가 결과** (`{metrics.get('period', '')}`)\n\n"
-                f"- 방향 정확도(전체): **{_fmt(dir_acc, pct=True)}**\n"
-                f"- 방향 정확도(Bear): **{_fmt_bear(dir_bear)}** ← 핵심 지표\n"
-                f"- RMSE: **{rmse:.3f}** · AsymLoss: **{asym:.3f}**\n"
-                f"- 평가 샘플 수: {n_ho}개"
-            )
-            _signal_rows([
-                ("방향 정확도 (전체)", _fmt(dir_acc, pct=True),
-                 "up" if dir_acc >= 70 else "dn"),
-                ("방향 정확도 (Bear)", _fmt_bear(dir_bear),
-                 "up" if bear_dir >= 60 else ("neu" if bear_dir >= 40 else "dn")),
-                ("RMSE", f"{rmse:.3f}", "neu"),
-                ("AsymLoss", f"{asym:.3f}", "neu"),
-            ])
 
         with st.expander("📈 예측 vs 실제 흐름 (수치)", expanded=False):
             st.dataframe(out_df.style.format("{:.2f}"), use_container_width=True)
@@ -918,15 +900,6 @@ def view_stage1(expert_mode: bool = False):
 
     render_direction_headline(df, cfg["value_label"])
 
-    render_detail_sections(metrics, df, "stage1", expert_mode)
-
-    with st.expander("🔬 SHAP 피처 중요도"):
-        render_shap_section(cfg)
-
-    with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
-        st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
-        render_ribbon_chart(df, metrics["rmse"])
-
     if expert_mode:
         st.markdown("#### 📊 모델 성능 분석")
         st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
@@ -936,6 +909,15 @@ def view_stage1(expert_mode: bool = False):
             "Bear 오예측 시 3배 페널티가 적용돼 하락 경고를 놓치지 않도록 설계됐어요. "
             "일반 RMSE와 같은 수치라면 평가 구간에 하락 샘플이 없는 경우예요."
         )
+
+    render_detail_sections(metrics, df, "stage1", expert_mode)
+
+    with st.expander("🔬 SHAP 피처 중요도"):
+        render_shap_section(cfg)
+
+    with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
+        st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
+        render_ribbon_chart(df, metrics["rmse"])
 
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
@@ -970,15 +952,6 @@ def view_stage2(expert_mode: bool = False):
 
     render_direction_headline(df, cfg["value_label"])
 
-    render_detail_sections(metrics, df, "stage2", expert_mode)
-
-    with st.expander("🔬 SHAP 피처 중요도"):
-        render_shap_section(cfg)
-
-    with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
-        st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
-        render_ribbon_chart(df, metrics["rmse"], height=340)
-
     if expert_mode:
         st.markdown("#### 📊 모델 성능 분석")
         st.caption(f"평가 구간: {metrics['period']}  ·  피처 {metrics['n_features']}개")
@@ -990,6 +963,15 @@ def view_stage2(expert_mode: bool = False):
             "**IC (Spearman)** — 예측 수익률 순위와 실제 수익률 순위가 얼마나 일치하는지 "
             "나타내요. 1에 가까울수록 크기 예측도 정확하고, 0이면 순위 예측력 없음이에요."
         )
+
+    render_detail_sections(metrics, df, "stage2", expert_mode)
+
+    with st.expander("🔬 SHAP 피처 중요도"):
+        render_shap_section(cfg)
+
+    with st.expander("📉 백테스트 결과 — 과거 예측이 얼마나 맞았나요?"):
+        st.caption(f"모델이 학습에 쓰지 않은 구간({metrics['period']})에서 예측값과 실제값을 비교한 검증 차트예요. 현재 예측과는 별개예요.")
+        render_ribbon_chart(df, metrics["rmse"], height=340)
 
     with st.expander("🔀 방향 예측 혼동행렬"):
         render_confusion(df)
